@@ -19,10 +19,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install required SDK packages
+        # ubuntu-latest runners ship with the Android SDK preinstalled
+        # (ANDROID_HOME set, sdkmanager on PATH), so no setup action needed.
         run: |
           yes | sdkmanager --licenses > /dev/null
           sdkmanager "platforms;android-35" "build-tools;34.0.0" "platform-tools"
