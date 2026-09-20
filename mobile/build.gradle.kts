@@ -13,8 +13,13 @@ android {
         applicationId = "com.fourgeailabs.bpwatch"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "9.0.0"
+        // Versioning policy (semver): MAJOR.MINOR.PATCH
+        //   MAJOR — milestones / breaking changes
+        //   MINOR — new features (continues our v1..v11 iteration count)
+        //   PATCH — bug fixes on the current MINOR line
+        // versionCode must increase by >= 1 every release for Android.
+        versionCode = 14
+        versionName = "1.11.3"
     }
 
     buildTypes {
@@ -25,6 +30,8 @@ android {
 
     buildFeatures {
         compose = true
+        // Needed so UI can read the version dynamically (no hard-coded strings).
+        buildConfig = true
     }
 
     sourceSets {

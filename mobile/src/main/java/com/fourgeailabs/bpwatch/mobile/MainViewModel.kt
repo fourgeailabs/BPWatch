@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.health.connect.client.HealthConnectClient
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationModel
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationPoint
 import com.fourgeailabs.bpwatch.mobile.data.Reading
@@ -39,10 +40,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var hcGranted: Boolean by mutableStateOf(false)
         private set
+    /** Raw Health Connect status for diagnostics, e.g. "needs Health Connect update". */
+    var hcStatusText: String by mutableStateOf(hc.sdkStatusText())
+        private set
+    /** True when Health Connect needs a Play Store update before it can work. */
+    var hcNeedsUpdate: Boolean by mutableStateOf(
+        hc.sdkStatus == HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED
+    )
+        private set
+    /** Per-permission Android runtime status, for diagnostics. */
+    var hcPermissionDetails: List<String> by mutableStateOf(hc.permissionStatusLines())
+        private set
     var latestWatchHr: Float? by mutableStateOf(null)
         private set
 
     val hcPermissions: Set<String> get() = hc.permissions
+    val hcReadPermissions: Set<String> get() = hc.readPermissions
 
     init {
         refreshHealthConnect()
@@ -50,6 +63,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshHealthConnect() {
+        hcStatusText = hc.sdkStatusText()
+        hcNeedsUpdate =
+            hc.sdkStatus == HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED
+        hcPermissionDetails = hc.permissionStatusLines()
         viewModelScope.launch {
             hcGranted = try {
                 hc.isAvailable && hc.hasPermissions()

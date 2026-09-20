@@ -12,6 +12,13 @@
     <!-- Result notifications when a new BP estimate is ready -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Health Connect: package visibility is required on Android 11+ for the
+         permission request to resolve. Without this the Connect button fails
+         silently and the app never appears in Health Connect's app list. -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
+
     <application
         android:label="BPWatch"
         android:icon="@mipmap/ic_launcher"

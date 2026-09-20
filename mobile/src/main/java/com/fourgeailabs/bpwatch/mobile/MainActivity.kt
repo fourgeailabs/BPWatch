@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,7 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.health.connect.client.PermissionController
+import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
 import com.fourgeailabs.bpwatch.mobile.ui.CalibrateScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HistoryScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HomeScreen
@@ -52,8 +54,15 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
     private val hcPermissionLauncher = registerForActivityResult(
-        PermissionController.createRequestPermissionResultContract()
-    ) {
+        HealthConnectManager(this).permissionContract()
+    ) { granted ->
+        // Diagnostic: this MUST fire after the system dialog (or a silent result).
+        Log.i("BpWatch", "HC permission result: granted=$granted")
+        Toast.makeText(
+            this,
+            "Health Connect: ${granted.size} granted",
+            Toast.LENGTH_LONG,
+        ).show()
         viewModel.onHcPermissionResult()
         viewModel.refreshHealthConnect()
     }
@@ -71,8 +80,15 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 BpWatchPhoneApp(
                     viewModel = viewModel,
-                    onRequestHcPermissions = {
-                        hcPermissionLauncher.launch(viewModel.hcPermissions)
+                    onRequestHcPermissions = { perms ->
+                        Log.i("BpWatch", "HC: tapping Connect, SDK=${viewModel.hcStatusText}, requesting=$perms")
+                        Toast.makeText(this, "Requesting ${perms.size} Health Connect permissions…", Toast.LENGTH_SHORT).show()
+                        try {
+                            hcPermissionLauncher.launch(perms)
+                        } catch (t: Throwable) {
+                            Log.e("BpWatch", "HC: permission launch failed", t)
+                            Toast.makeText(this, "Permission request failed: ${t.message}", Toast.LENGTH_LONG).show()
+                        }
                     },
                     crashReport = lastCrashReport,
                     onDismissCrashReport = {
@@ -161,7 +177,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun BpWatchPhoneApp(
     viewModel: MainViewModel,
-    onRequestHcPermissions: () -> Unit,
+    onRequestHcPermissions: (Set<String>) -> Unit,
     crashReport: String?,
     onDismissCrashReport: () -> Unit,
 ) {

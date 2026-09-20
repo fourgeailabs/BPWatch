@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
+import com.fourgeailabs.bpwatch.BuildConfig
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationEngine
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
@@ -40,7 +42,7 @@ import com.fourgeailabs.bpwatch.mobile.profile.UserProfile
 @Composable
 fun SettingsScreen(
     viewModel: MainViewModel,
-    onRequestHealthConnectPermissions: () -> Unit,
+    onRequestHealthConnectPermissions: (Set<String>) -> Unit,
 ) {
     val context = LocalContext.current
     val model by viewModel.calibrationModel.collectAsState()
@@ -61,6 +63,11 @@ fun SettingsScreen(
         SamsungHealthCard(
             hcAvailable = viewModel.hcAvailable,
             hcGranted = viewModel.hcGranted,
+            hcStatusText = viewModel.hcStatusText,
+            hcNeedsUpdate = viewModel.hcNeedsUpdate,
+            hcPermissionDetails = viewModel.hcPermissionDetails,
+            hcPermissions = viewModel.hcPermissions,
+            hcReadPermissions = viewModel.hcReadPermissions,
             onRequestPermissions = onRequestHealthConnectPermissions,
             onRefresh = { viewModel.refreshHealthConnect() },
         )
@@ -102,7 +109,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(8.dp))
         Text(
-            "BPWatch 9.0.0 — built for Galaxy Watch Ultra + Pixel",
+            "BPWatch ${BuildConfig.VERSION_NAME} — built for Galaxy Watch Ultra + Pixel",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -213,7 +220,12 @@ private fun ProfileCard(profile: UserProfile, onSave: (UserProfile) -> Unit) {
 private fun SamsungHealthCard(
     hcAvailable: Boolean,
     hcGranted: Boolean,
-    onRequestPermissions: () -> Unit,
+    hcStatusText: String,
+    hcNeedsUpdate: Boolean,
+    hcPermissionDetails: List<String>,
+    hcPermissions: Set<String>,
+    hcReadPermissions: Set<String>,
+    onRequestPermissions: (Set<String>) -> Unit,
     onRefresh: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -241,11 +253,20 @@ private fun SamsungHealthCard(
                 text = when {
                     hcGranted -> "Status: connected ✓"
                     !hcInstalled -> "Status: Health Connect isn't installed."
-                    !hcAvailable -> "Status: Health Connect isn't available on this phone."
-                    else -> "Status: not connected"
+                    hcNeedsUpdate -> "Status: Health Connect needs an update before apps can use it."
+                    !hcAvailable -> "Status: Health Connect $hcStatusText."
+                    else -> "Status: not connected (Health Connect $hcStatusText)"
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
+            // Per-permission diagnostics: shows exactly what Android thinks is granted.
+            hcPermissionDetails.forEach { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (samsungInstalled) {
                 OutlinedButton(
                     onClick = { HealthConnectManager.openSamsungHealth(context) },
@@ -253,15 +274,32 @@ private fun SamsungHealthCard(
                     Text("Open Samsung Health")
                 }
             }
-            if (!hcInstalled) {
+            if (!hcInstalled || hcNeedsUpdate) {
                 Button(
                     onClick = { HealthConnectManager.openHealthConnectInPlayStore(context) },
                 ) {
-                    Text("Install Health Connect")
+                    Text(if (hcNeedsUpdate) "Update Health Connect" else "Install Health Connect")
                 }
             } else if (!hcGranted) {
-                Button(onClick = onRequestPermissions) {
+                Button(onClick = { onRequestPermissions(hcPermissions) }) {
                     Text("Connect Health Connect")
+                }
+                OutlinedButton(onClick = { onRequestPermissions(hcReadPermissions) }) {
+                    Text("Try read-only request")
+                }
+                OutlinedButton(
+                    onClick = {
+                        val ok = HealthConnectManager.openAppHealthPermissions(context)
+                        Toast.makeText(
+                            context,
+                            if (ok) "Opening BPWatch's Health Connect toggles — " +
+                                "switch them on, then come back and tap Refresh below."
+                            else "Couldn't open Health Connect settings.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    },
+                ) {
+                    Text("Grant permissions manually")
                 }
                 OutlinedButton(
                     onClick = { HealthConnectManager.openHealthConnectSettings(context) },

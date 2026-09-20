@@ -8,7 +8,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.fourgeailabs.bpwatch.mobile.MainActivity
-import com.fourgeailabs.bpwatch.mobile.R
+import com.fourgeailabs.bpwatch.R
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter

@@ -38,11 +38,26 @@ class HealthConnectManager(private val context: Context) {
      * (Called during ViewModel construction, before any try/catch can help.)
      */
     val isAvailable: Boolean
+        get() = sdkStatus == HealthConnectClient.SDK_AVAILABLE
+
+    /**
+     * Raw SDK status: SDK_AVAILABLE, SDK_UNAVAILABLE, or
+     * SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED. Surfaced in Settings so a
+     * silent failure is diagnosable instead of mysterious.
+     */
+    val sdkStatus: Int
         get() = try {
-            HealthConnectClient.getSdkStatus(context) == HealthConnectClient.SDK_AVAILABLE
+            HealthConnectClient.getSdkStatus(context)
         } catch (_: Exception) {
-            false
+            HealthConnectClient.SDK_UNAVAILABLE
         }
+
+    fun sdkStatusText(): String = when (sdkStatus) {
+        HealthConnectClient.SDK_AVAILABLE -> "available"
+        HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED ->
+            "needs Health Connect update (Play Store)"
+        else -> "not available on this device"
+    }
 
     val permissions: Set<String> = setOf(
         HealthPermission.getReadPermission(OxygenSaturationRecord::class),
@@ -50,10 +65,29 @@ class HealthConnectManager(private val context: Context) {
         HealthPermission.getWritePermission(BloodPressureRecord::class),
     )
 
+    /**
+     * Read-only subset, for A/B diagnosis: if the full set is cancelled by the
+     * system but this one shows the dialog, the WRITE permission is the poison.
+     */
+    val readPermissions: Set<String> = setOf(
+        HealthPermission.getReadPermission(OxygenSaturationRecord::class),
+        HealthPermission.getReadPermission(BloodPressureRecord::class),
+    )
+
     fun permissionContract() = PermissionController.createRequestPermissionResultContract()
 
     suspend fun hasPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().containsAll(permissions)
+
+    /**
+     * Per-permission Android runtime status (granted/denied), for diagnostics.
+     * Short names keep the Settings card readable.
+     */
+    fun permissionStatusLines(): List<String> = permissions.map { perm ->
+        val short = perm.substringAfterLast('.')
+        val granted = context.checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED
+        "$short: ${if (granted) "granted ✓" else "not granted"}"
+    }
 
     /** Latest SpO2 % from the last 7 days, or null. */
     suspend fun readLatestSpo2(): Int? {
@@ -134,14 +168,56 @@ class HealthConnectManager(private val context: Context) {
 
         /** Opens the system Health Connect settings screen. */
         fun openHealthConnectSettings(context: Context): Boolean {
-            return try {
-                val intent = Intent("androidx.health.ACTION_HEALTH_CONNECT_SETTINGS")
+            // The Jetpack action doesn't resolve on all devices (notably some
+            // Android 16 builds), so try the platform Home settings action too.
+            val actions = listOf(
+                "android.health.connect.action.HEALTH_HOME_SETTINGS",
+                "androidx.health.ACTION_HEALTH_CONNECT_SETTINGS",
+            )
+            return actions.any { action ->
+                try {
+                    val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (intent.resolveActivity(context.packageManager) != null) {
+                        context.startActivity(intent)
+                        true
+                    } else {
+                        false
+                    }
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
+
+        /**
+         * Opens Health Connect's per-app permission screen for BPWatch, where
+         * the user can flip the permission toggles directly. This is the
+         * manual fallback for devices where the automatic permission dialog
+         * never appears (the request is cancelled by the system with zero
+         * grants). Falls back to the general Health Connect settings screen.
+         * Returns true if something was launched.
+         */
+        fun openAppHealthPermissions(context: Context): Boolean {
+            val launched = try {
+                // Platform action, API 34+: manage health permissions for one app.
+                // The constant is inlined at compile time, so referencing it is
+                // safe even on older devices (the intent simply won't resolve).
+                val intent = Intent(
+                    android.health.connect.HealthConnectManager
+                        .ACTION_MANAGE_HEALTH_PERMISSIONS
+                )
+                    .putExtra(Intent.EXTRA_PACKAGE_NAME, context.packageName)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                true
+                if (intent.resolveActivity(context.packageManager) != null) {
+                    context.startActivity(intent)
+                    true
+                } else {
+                    false
+                }
             } catch (_: Exception) {
                 false
             }
+            return launched || openHealthConnectSettings(context)
         }
 
         private fun openUrl(context: Context, url: String) {
