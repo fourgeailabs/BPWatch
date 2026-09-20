@@ -19,14 +19,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -43,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
+import com.fourgeailabs.bpwatch.mobile.ui.BpWatchTheme
 import com.fourgeailabs.bpwatch.mobile.ui.CalibrateScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HistoryScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HomeScreen
@@ -77,7 +83,7 @@ class MainActivity : ComponentActivity() {
         ensureNotificationPermission()
         val lastCrashReport = readCrashReport()
         setContent {
-            MaterialTheme {
+            BpWatchTheme {
                 BpWatchPhoneApp(
                     viewModel = viewModel,
                     onRequestHcPermissions = { perms ->
@@ -174,6 +180,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BpWatchPhoneApp(
     viewModel: MainViewModel,
@@ -182,13 +189,15 @@ private fun BpWatchPhoneApp(
     onDismissCrashReport: () -> Unit,
 ) {
     val context = LocalContext.current
-    var tab by remember { mutableIntStateOf(0) }
+    // 0..3 = bottom tabs, 4 = Calibrate page (opened from Home, not a tab).
+    var selected by remember { mutableIntStateOf(0) }
     var showCrash by remember(crashReport) { mutableStateOf(crashReport != null) }
 
     if (showCrash && crashReport != null) {
         val report = crashReport
         AlertDialog(
             onDismissRequest = { /* must choose */ },
+            icon = { Icon(Icons.Filled.Warning, contentDescription = null) },
             title = { Text("The app crashed last time") },
             text = {
                 Text(
@@ -231,6 +240,7 @@ private fun BpWatchPhoneApp(
     if (showDisclaimer) {
         AlertDialog(
             onDismissRequest = { /* must acknowledge */ },
+            icon = { Icon(Icons.Filled.Info, contentDescription = null) },
             title = { Text("Before you start") },
             text = {
                 Text(
@@ -258,19 +268,33 @@ private fun BpWatchPhoneApp(
 
     val tabs = listOf(
         "Home" to Icons.Filled.Home,
-        "Calibrate" to Icons.Filled.MonitorHeart,
         "History" to Icons.Filled.History,
         "Watch" to Icons.Filled.Watch,
         "Settings" to Icons.Filled.Settings,
     )
 
     Scaffold(
+        topBar = {
+            if (selected == 4) {
+                MediumTopAppBar(
+                    title = { Text("Calibrate") },
+                    navigationIcon = {
+                        IconButton(onClick = { selected = 0 }) {
+                            Icon(
+                                Icons.Filled.ArrowBack,
+                                contentDescription = "Back to Home",
+                            )
+                        }
+                    },
+                )
+            }
+        },
         bottomBar = {
             NavigationBar {
                 tabs.forEachIndexed { index, (label, icon) ->
                     NavigationBarItem(
-                        selected = tab == index,
-                        onClick = { tab = index },
+                        selected = selected == index,
+                        onClick = { selected = index },
                         icon = { Icon(icon, contentDescription = label) },
                         label = { Text(label) },
                     )
@@ -279,12 +303,12 @@ private fun BpWatchPhoneApp(
         }
     ) { padding ->
         Box(Modifier.padding(padding)) {
-            when (tab) {
-                0 -> HomeScreen(viewModel)
-                1 -> CalibrateScreen(viewModel)
-                2 -> HistoryScreen(viewModel)
-                3 -> WatchInstallScreen()
-                4 -> SettingsScreen(viewModel, onRequestHcPermissions)
+            when (selected) {
+                0 -> HomeScreen(viewModel, onOpenCalibrate = { selected = 4 })
+                1 -> HistoryScreen(viewModel)
+                2 -> WatchInstallScreen()
+                3 -> SettingsScreen(viewModel, onRequestHcPermissions)
+                4 -> CalibrateScreen(viewModel)
             }
         }
     }

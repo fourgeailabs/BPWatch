@@ -12,11 +12,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -29,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationEngine
@@ -49,11 +54,21 @@ fun CalibrateScreen(viewModel: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text("Calibrate", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(4.dp))
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("How calibration works", style = MaterialTheme.typography.titleSmall)
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        TintedIcon(icon = Icons.Filled.Info, contentDescription = null)
+                        Text(
+                            "How calibration works",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
                     Text(
                         "1. Sit quietly for 5 minutes, cuff on your arm.\n" +
                             "2. Tap Measure on your Galaxy Watch.\n" +
@@ -67,14 +82,21 @@ fun CalibrateScreen(viewModel: MainViewModel) {
         }
 
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Add a calibration point", style = MaterialTheme.typography.titleSmall)
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        "Add a calibration point",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        TintedIcon(icon = Icons.Filled.Favorite, contentDescription = "Heart rate")
                         Text(
                             text = "Watch heart rate: " + (watchHr?.let { "${it.toInt()} bpm" } ?: "none yet"),
                             style = MaterialTheme.typography.bodyMedium,
@@ -149,19 +171,27 @@ fun CalibrateScreen(viewModel: MainViewModel) {
         }
 
         itemsIndexed(points) { index, p ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("${p.sys}/${p.dia} mmHg  @  ${p.heartRate.toInt()} bpm")
-                    IconButton(onClick = { viewModel.removeCalibrationPoint(index) }) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Delete point")
-                    }
-                }
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            "${p.sys}/${p.dia} mmHg",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    },
+                    supportingContent = {
+                        Text(
+                            "@ ${p.heartRate.toInt()} bpm",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                    trailingContent = {
+                        IconButton(onClick = { viewModel.removeCalibrationPoint(index) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete point")
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
             }
         }
 

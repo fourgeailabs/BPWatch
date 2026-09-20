@@ -33,8 +33,11 @@ import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Scaffold
+import androidx.wear.compose.material.Switch
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
+import androidx.wear.compose.material.ToggleChip
+import androidx.wear.compose.material.ToggleChipDefaults
 import androidx.wear.compose.material.Vignette
 import androidx.wear.compose.material.VignettePosition
 import kotlinx.coroutines.delay
@@ -179,13 +182,14 @@ private fun BpWatchApp(
             modifier = Modifier.fillMaxSize(),
             state = listState,
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
                 Spacer(Modifier.height(24.dp))
                 Text(
                     text = "BPWatch",
                     style = MaterialTheme.typography.title3,
+                    color = MaterialTheme.colors.onBackground.copy(alpha = 0.75f),
                     textAlign = TextAlign.Center,
                 )
             }
@@ -193,6 +197,7 @@ private fun BpWatchApp(
             when (uiState) {
                 UiState.IDLE -> {
                     val est = lastEstimate
+                    val hourlyOn = checkMode == WatchSettings.CheckMode.HOURLY
                     item {
                         if (est != null) {
                             Text(
@@ -239,36 +244,25 @@ private fun BpWatchApp(
                         )
                     }
                     item {
-                        Chip(
-                            onClick = {
+                        ToggleChip(
+                            checked = hourlyOn,
+                            onCheckedChange = { on ->
                                 setMode(
-                                    if (checkMode == WatchSettings.CheckMode.MANUAL) {
-                                        WatchSettings.CheckMode.HOURLY
-                                    } else {
-                                        WatchSettings.CheckMode.MANUAL
-                                    },
+                                    if (on) WatchSettings.CheckMode.HOURLY
+                                    else WatchSettings.CheckMode.MANUAL,
                                 )
                             },
-                            label = {
+                            label = { Text("Hourly checks", textAlign = TextAlign.Center) },
+                            toggleControl = { Switch(checked = hourlyOn) },
+                            secondaryLabel = {
                                 Text(
-                                    if (checkMode == WatchSettings.CheckMode.HOURLY) "Hourly: On"
-                                    else "Hourly: Off",
+                                    text = if (hourlyOn) "Auto-checks every hour"
+                                    else "Manual checks only",
                                     textAlign = TextAlign.Center,
                                 )
                             },
                             modifier = Modifier.fillMaxWidth(0.85f),
-                            colors = ChipDefaults.secondaryChipColors(),
-                        )
-                    }
-                    item {
-                        Text(
-                            text = if (checkMode == WatchSettings.CheckMode.HOURLY) {
-                                "Auto-checks every hour"
-                            } else {
-                                "Manual checks only"
-                            },
-                            style = MaterialTheme.typography.caption2,
-                            textAlign = TextAlign.Center,
+                            colors = ToggleChipDefaults.toggleChipColors(),
                         )
                         Spacer(Modifier.height(24.dp))
                     }
@@ -277,7 +271,10 @@ private fun BpWatchApp(
                 UiState.MEASURING -> {
                     item {
                         Spacer(Modifier.height(24.dp))
-                        CircularProgressIndicator(progress = progress)
+                        CircularProgressIndicator(
+                            progress = progress,
+                            strokeWidth = 6.dp,
+                        )
                     }
                     item {
                         Text(
@@ -300,7 +297,7 @@ private fun BpWatchApp(
                 UiState.SENDING -> {
                     item {
                         Spacer(Modifier.height(24.dp))
-                        CircularProgressIndicator()
+                        CircularProgressIndicator(strokeWidth = 6.dp)
                     }
                     item {
                         Text("Sending to phone…", textAlign = TextAlign.Center)
@@ -329,6 +326,7 @@ private fun BpWatchApp(
                                 "Stress: $sentStress/100 (${StressEstimator.label(sentStress)})",
                                 style = MaterialTheme.typography.caption1,
                                 textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(top = 4.dp),
                             )
                         }
                     }

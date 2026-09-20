@@ -11,8 +11,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -24,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -189,9 +195,9 @@ fun WatchInstallScreen() {
             .fillMaxSize()
             .verticalScroll(scroll)
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Watch app", style = MaterialTheme.typography.headlineSmall)
+        Text("Watch app", style = MaterialTheme.typography.headlineMedium)
         Text(
             "Install or update BPWatch on your Galaxy Watch over Wi-Fi — " +
                 "no PC or cable needed. The watch app is bundled inside this " +
@@ -200,9 +206,10 @@ fun WatchInstallScreen() {
         )
         Text(
             "On the watch: Settings → Developer options → Wireless debugging → " +
-                "turn it on. First pair once using “Pair new device” below, then " +
+                "turn it on. First pair once using step 1 below, then " +
                 "install using the IP and port from the main wireless-debugging screen.",
             style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         OutlinedTextField(
@@ -215,12 +222,29 @@ fun WatchInstallScreen() {
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Card(modifier = Modifier.fillMaxWidth()) {
+        // Step 1: pair.
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(
-                modifier = Modifier.padding(12.dp),
+                modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Pairing (first time only)", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TintedIcon(icon = Icons.Filled.Bluetooth, contentDescription = null)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "1 · Pair with watch",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            "First time only",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 Text(
                     "On the watch: Wireless debugging → “Pair new device”. " +
                         "Enter the pairing port and the 6-digit code shown there. " +
@@ -245,28 +269,45 @@ fun WatchInstallScreen() {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Button(onClick = ::pairWatch, enabled = !busy) {
+                FilledTonalButton(onClick = ::pairWatch, enabled = !busy) {
                     Text("Pair with watch")
                 }
             }
         }
 
-        OutlinedTextField(
-            value = portText,
-            onValueChange = { portText = it },
-            label = { Text("ADB port (main wireless-debugging screen)") },
-            singleLine = true,
-            enabled = !busy,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = ::testConnection, enabled = !busy) {
-                Text("Test connection")
-            }
-            Button(onClick = ::installOrUpdate, enabled = !busy) {
-                Text("Install / Update")
+        // Step 2: connect & install.
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TintedIcon(icon = Icons.Filled.Link, contentDescription = null)
+                    Text(
+                        "2 · Connect & install",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                OutlinedTextField(
+                    value = portText,
+                    onValueChange = { portText = it },
+                    label = { Text("ADB port (main wireless-debugging screen)") },
+                    singleLine = true,
+                    enabled = !busy,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = ::testConnection, enabled = !busy) {
+                        Text("Test connection")
+                    }
+                    Button(onClick = ::installOrUpdate, enabled = !busy) {
+                        Text("Install / Update")
+                    }
+                }
             }
         }
 
@@ -278,11 +319,22 @@ fun WatchInstallScreen() {
         }
 
         if (logLines.isNotEmpty()) {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
+            ) {
                 // NOTE: no verticalScroll here — the screen's outer Column
                 // already scrolls, and nesting a scrollable inside a
                 // scrollable crashes Compose with infinite-height constraints.
                 Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "Log",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
                     logLines.forEach { line ->
                         Text(
                             line,
@@ -294,5 +346,6 @@ fun WatchInstallScreen() {
                 }
             }
         }
+        Spacer(Modifier.height(8.dp))
     }
 }

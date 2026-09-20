@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- NOTE: Theme.Material3.DayNight.NoActionBar lives in the Material Components
+         (com.google.android.material) library, which this app does not depend on —
+         compose-material3 1.3.1 ships no view themes at all (verified in the AAR).
+         The platform parent below keeps the build working; day/night is handled
+         in Compose by BpWatchTheme. -->
     <style name="Theme.BpWatch" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/ic_launcher_background</item>
         <item name="android:statusBarColor">@color/ic_launcher_background</item>

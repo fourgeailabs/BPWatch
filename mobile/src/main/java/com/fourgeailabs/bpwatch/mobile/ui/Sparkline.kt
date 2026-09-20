@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import com.fourgeailabs.bpwatch.mobile.data.Reading
@@ -44,7 +45,7 @@ fun BpSparkline(readings: List<Reading>) {
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
-            .height(140.dp)
+            .height(160.dp)
             .padding(vertical = 8.dp)
     ) {
         val allValues = points.flatMap { listOf(it.second, it.third) }
@@ -64,7 +65,26 @@ fun BpSparkline(readings: List<Reading>) {
             return path
         }
 
-        drawPath(line(points.map { it.second }), sysColor, style = Stroke(width = 5f))
-        drawPath(line(points.map { it.third }), diaColor, style = Stroke(width = 5f))
+        val sysPath = line(points.map { it.second })
+
+        // Subtle fill under the systolic line.
+        val fill = Path().apply {
+            addPath(sysPath)
+            lineTo(x(points.size - 1), size.height)
+            lineTo(x(0), size.height)
+            close()
+        }
+        drawPath(fill, sysColor.copy(alpha = 0.10f))
+
+        drawPath(
+            sysPath,
+            sysColor,
+            style = Stroke(width = 6f, cap = StrokeCap.Round),
+        )
+        drawPath(
+            line(points.map { it.third }),
+            diaColor,
+            style = Stroke(width = 6f, cap = StrokeCap.Round),
+        )
     }
 }

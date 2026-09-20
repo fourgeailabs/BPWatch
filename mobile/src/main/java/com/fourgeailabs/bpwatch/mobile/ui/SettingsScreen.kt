@@ -8,18 +8,31 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -27,7 +40,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -44,7 +60,6 @@ fun SettingsScreen(
     viewModel: MainViewModel,
     onRequestHealthConnectPermissions: (Set<String>) -> Unit,
 ) {
-    val context = LocalContext.current
     val model by viewModel.calibrationModel.collectAsState()
     val points by viewModel.calibrationPoints.collectAsState()
     val profile by viewModel.userProfile.collectAsState()
@@ -54,56 +69,79 @@ fun SettingsScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         Text("Settings", style = MaterialTheme.typography.headlineMedium)
 
-        ProfileCard(profile = profile, onSave = { viewModel.saveProfile(it) })
+        SettingsSection(title = "Body profile", icon = Icons.Filled.Person) {
+            ProfileCard(profile = profile, onSave = { viewModel.saveProfile(it) })
+        }
 
-        SamsungHealthCard(
-            hcAvailable = viewModel.hcAvailable,
-            hcGranted = viewModel.hcGranted,
-            hcStatusText = viewModel.hcStatusText,
-            hcNeedsUpdate = viewModel.hcNeedsUpdate,
-            hcPermissionDetails = viewModel.hcPermissionDetails,
-            hcPermissions = viewModel.hcPermissions,
-            hcReadPermissions = viewModel.hcReadPermissions,
-            onRequestPermissions = onRequestHealthConnectPermissions,
-            onRefresh = { viewModel.refreshHealthConnect() },
-        )
+        SettingsSection(title = "Connections", icon = Icons.Filled.Favorite) {
+            SamsungHealthCard(
+                hcAvailable = viewModel.hcAvailable,
+                hcGranted = viewModel.hcGranted,
+                hcStatusText = viewModel.hcStatusText,
+                hcNeedsUpdate = viewModel.hcNeedsUpdate,
+                hcPermissionDetails = viewModel.hcPermissionDetails,
+                hcPermissions = viewModel.hcPermissions,
+                hcReadPermissions = viewModel.hcReadPermissions,
+                onRequestPermissions = onRequestHealthConnectPermissions,
+                onRefresh = { viewModel.refreshHealthConnect() },
+            )
+        }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Calibration", style = MaterialTheme.typography.titleSmall)
-                val m = model
-                Text(
-                    text = if (m != null)
-                        "Calibrated with ${m.points} points. " +
-                            "Systolic ≈ ${"%.2f".format(m.aSys)}×HR ${"%+.1f".format(m.bSys)}; " +
-                            "diastolic ≈ ${"%.2f".format(m.aDia)}×HR ${"%+.1f".format(m.bDia)}."
-                    else
-                        "Not calibrated yet — ${CalibrationEngine.MIN_POINTS - points.size} more " +
-                            "cuff readings needed.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                if (points.isNotEmpty()) {
-                    OutlinedButton(onClick = { viewModel.clearCalibration() }) {
-                        Text("Clear calibration")
+        SettingsSection(title = "Calibration", icon = Icons.Filled.Tune) {
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val m = model
+                    Text(
+                        text = if (m != null)
+                            "Calibrated with ${m.points} points. " +
+                                "Systolic ≈ ${"%.2f".format(m.aSys)}×HR ${"%+.1f".format(m.bSys)}; " +
+                                "diastolic ≈ ${"%.2f".format(m.aDia)}×HR ${"%+.1f".format(m.bDia)}."
+                        else
+                            "Not calibrated yet — ${CalibrationEngine.MIN_POINTS - points.size} more " +
+                                "cuff readings needed.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (points.isNotEmpty()) {
+                        OutlinedButton(onClick = { viewModel.clearCalibration() }) {
+                            Text("Clear calibration")
+                        }
                     }
                 }
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Important", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    text = "BPWatch is a personal wellness tool, not a medical device. " +
-                        "Blood pressure here is estimated from heart rate using your own " +
-                        "cuff calibration — it is not a measurement. Never use it to " +
-                        "diagnose, treat, or adjust medication. When in doubt, use a cuff.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+        SettingsSection(title = "About", icon = Icons.Filled.Info) {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                ),
+            ) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "Important",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    )
+                    Text(
+                        text = "BPWatch is a personal wellness tool, not a medical device. " +
+                            "Blood pressure here is estimated from heart rate using your own " +
+                            "cuff calibration — it is not a measurement. Never use it to " +
+                            "diagnose, treat, or adjust medication. When in doubt, use a cuff.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    )
+                }
             }
         }
 
@@ -113,6 +151,34 @@ fun SettingsScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun SettingsSection(
+    title: String,
+    icon: ImageVector,
+    content: @Composable () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 4.dp),
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        content()
     }
 }
 
@@ -126,9 +192,8 @@ private fun ProfileCard(profile: UserProfile, onSave: (UserProfile) -> Unit) {
     var sexExpanded by remember { mutableStateOf(false) }
     val sexOptions = listOf("Female", "Male", "Other", "Prefer not to say")
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Body profile", style = MaterialTheme.typography.titleSmall)
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
                 text = "Height, weight, age and sex — used for BMI and health context. " +
                     "Your BP estimate comes from your own cuff calibration, so your " +
@@ -199,11 +264,17 @@ private fun ProfileCard(profile: UserProfile, onSave: (UserProfile) -> Unit) {
                 sex = sex.ifBlank { null },
             )
             preview.bmi?.let { bmi ->
-                Text(
-                    text = "BMI: ${"%.1f".format(bmi)} (${preview.bmiLabel})",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text(
+                        text = "BMI: ${"%.1f".format(bmi)} (${preview.bmiLabel})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
             }
             Button(
                 onClick = {
@@ -236,40 +307,79 @@ private fun SamsungHealthCard(
         HealthConnectManager.isSamsungHealthInstalled(context)
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Samsung Health", style = MaterialTheme.typography.titleSmall)
-            Text(
-                text = "SpO2 and other watch data reach BPWatch through Samsung Health → " +
-                    "Health Connect. Two steps:",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TintedIcon(icon = Icons.Filled.Favorite, contentDescription = null)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Samsung Health", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "SpO2 and watch data via Samsung Health → Health Connect",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             Text(
                 text = "1. In Samsung Health: Settings → Health Connect → allow sharing.\n" +
                     "2. Below: grant BPWatch permission to read Health Connect.",
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Text(
-                text = when {
-                    hcGranted -> "Status: connected ✓"
-                    !hcInstalled -> "Status: Health Connect isn't installed."
-                    hcNeedsUpdate -> "Status: Health Connect needs an update before apps can use it."
-                    !hcAvailable -> "Status: Health Connect $hcStatusText."
-                    else -> "Status: not connected (Health Connect $hcStatusText)"
-                },
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            // Per-permission diagnostics: shows exactly what Android thinks is granted.
-            hcPermissionDetails.forEach { line ->
-                Text(
-                    text = line,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+
+            // Connection status row.
+            val statusText = when {
+                hcGranted -> "Status: connected ✓"
+                !hcInstalled -> "Status: Health Connect isn't installed."
+                hcNeedsUpdate -> "Status: Health Connect needs an update before apps can use it."
+                !hcAvailable -> "Status: Health Connect $hcStatusText."
+                else -> "Status: not connected (Health Connect $hcStatusText)"
             }
+            ListItem(
+                headlineContent = {
+                    Text(statusText, style = MaterialTheme.typography.bodyMedium)
+                },
+                leadingContent = {
+                    Icon(
+                        if (hcGranted) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = if (hcGranted)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            // Per-permission diagnostics: shows exactly what Android thinks is granted.
+            if (hcPermissionDetails.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Column(
+                        Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        hcPermissionDetails.forEach { line ->
+                            Text(
+                                text = line,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+
             if (samsungInstalled) {
                 OutlinedButton(
                     onClick = { HealthConnectManager.openSamsungHealth(context) },
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Open Samsung Health")
                 }
@@ -277,14 +387,21 @@ private fun SamsungHealthCard(
             if (!hcInstalled || hcNeedsUpdate) {
                 Button(
                     onClick = { HealthConnectManager.openHealthConnectInPlayStore(context) },
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(if (hcNeedsUpdate) "Update Health Connect" else "Install Health Connect")
                 }
             } else if (!hcGranted) {
-                Button(onClick = { onRequestPermissions(hcPermissions) }) {
+                Button(
+                    onClick = { onRequestPermissions(hcPermissions) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text("Connect Health Connect")
                 }
-                OutlinedButton(onClick = { onRequestPermissions(hcReadPermissions) }) {
+                OutlinedButton(
+                    onClick = { onRequestPermissions(hcReadPermissions) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text("Try read-only request")
                 }
                 OutlinedButton(
@@ -298,17 +415,22 @@ private fun SamsungHealthCard(
                             Toast.LENGTH_LONG,
                         ).show()
                     },
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Grant permissions manually")
                 }
                 OutlinedButton(
                     onClick = { HealthConnectManager.openHealthConnectSettings(context) },
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Health Connect settings")
                 }
             }
             if (hcGranted) {
-                OutlinedButton(onClick = onRefresh) {
+                OutlinedButton(
+                    onClick = onRefresh,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text("Refresh SpO2 now")
                 }
             }

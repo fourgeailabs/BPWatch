@@ -18,8 +18,8 @@ android {
         //   MINOR — new features (continues our v1..v11 iteration count)
         //   PATCH — bug fixes on the current MINOR line
         // versionCode must increase by >= 1 every release for Android.
-        versionCode = 15
-        versionName = "1.11.4"
+        versionCode = 16
+        versionName = "1.12.0"
     }
 
     buildTypes {
@@ -62,7 +62,10 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
+    // Pinned past the compose BOM (2024.06.00 -> 1.2.1) for Material 3
+    // Expressive (MaterialExpressiveTheme). Safe: 1.3.1 targets compose 1.7.0,
+    // exactly what this BOM pins.
+    implementation("androidx.compose.material3:material3:1.3.1")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
