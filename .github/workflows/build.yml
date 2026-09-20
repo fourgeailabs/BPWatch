@@ -31,7 +31,11 @@ jobs:
         # useMavenProxy=false: the repo's settings.gradle.kts routes Maven
         # through a local sandbox proxy by default; CI runners have direct
         # internet access, so the proxy must be switched off here.
-        run: ./gradlew :mobile:assembleDebug :wear:assembleDebug -PuseMavenProxy=false
+        # chmod +x: file modes don't survive the API-based push, so ensure
+        # the wrapper script is executable on the runner.
+        run: |
+          chmod +x gradlew
+          ./gradlew :mobile:assembleDebug :wear:assembleDebug -PuseMavenProxy=false
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
