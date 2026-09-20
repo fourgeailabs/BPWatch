@@ -21,8 +21,9 @@ jobs:
 
       - name: Install required SDK packages
         # ubuntu-latest runners ship with the Android SDK preinstalled
-        # (ANDROID_HOME set, sdkmanager on PATH), so no setup action needed.
+        # (ANDROID_HOME set); sdkmanager lives under cmdline-tools.
         run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --licenses > /dev/null
           sdkmanager "platforms;android-35" "build-tools;34.0.0" "platform-tools"
 
