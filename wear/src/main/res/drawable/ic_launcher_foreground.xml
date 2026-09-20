@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Crimson heart -->
+    <path
+        android:fillColor="@color/bpwatch_heart"
+        android:pathData="M54,86 C41,75 26,61 26,45 C26,34 34,26 44,26 C49,26 53,29 54,33 C55,29 59,26 64,26 C74,26 82,34 82,45 C82,61 67,75 54,86 Z" />
+    <!-- White ECG pulse line across the heart -->
+    <path
+        android:strokeColor="@color/bpwatch_pulse"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M16,54 h15 l7,-13 l9,26 l7,-17 l5,4 h15" />
+</vector>
