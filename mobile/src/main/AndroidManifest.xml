@@ -31,7 +31,30 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Health Connect (Android 13 and below): rationale entry point so
+                 the HC app can deep-link into us for "why does this app want
+                 this data?". Without it HC ignores the app. -->
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
         </activity>
+
+        <!-- Health Connect (Android 14+): permission-rationale entry point.
+             The system will NOT present the permission request at all if this
+             alias is missing — the request silently returns 0 granted and the
+             app never appears in Health Connect's app list. Health Connect
+             opens our MainActivity with the rationale intent; the user can
+             read why we need the data in Settings. -->
+        <activity-alias
+            android:name="com.fourgeailabs.bpwatch.mobile.ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity="com.fourgeailabs.bpwatch.mobile.MainActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- Receives heart-rate readings from the watch -->
         <service

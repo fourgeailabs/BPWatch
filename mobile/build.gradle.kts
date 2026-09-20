@@ -18,8 +18,8 @@ android {
         //   MINOR — new features (continues our v1..v11 iteration count)
         //   PATCH — bug fixes on the current MINOR line
         // versionCode must increase by >= 1 every release for Android.
-        versionCode = 14
-        versionName = "1.11.3"
+        versionCode = 15
+        versionName = "1.11.4"
     }
 
     buildTypes {
