@@ -11,11 +11,15 @@ pluginManagement {
         }
     }
     repositories {
-        // Local proxy (http://127.0.0.1:8081) forwards to Google/Maven Central/
-        // Plugin Portal, bypassing the sandbox MITM TLS issues in Gradle's HTTP client.
-        maven {
-            url = uri("http://127.0.0.1:8081/")
-            isAllowInsecureProtocol = true
+        // Local sandbox proxy (http://127.0.0.1:8081) forwards to Google /
+        // Maven Central / Plugin Portal, bypassing the sandbox MITM TLS
+        // issues in Gradle's HTTP client. Disable on CI runners (which have
+        // direct internet) with -PuseMavenProxy=false.
+        if (providers.gradleProperty("useMavenProxy").getOrElse("true") == "true") {
+            maven {
+                url = uri("http://127.0.0.1:8081/")
+                isAllowInsecureProtocol = true
+            }
         }
         google()
         mavenCentral()
@@ -25,9 +29,13 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven {
-            url = uri("http://127.0.0.1:8081/")
-            isAllowInsecureProtocol = true
+        // Same local-proxy switch as pluginManagement above; CI passes
+        // -PuseMavenProxy=false.
+        if (providers.gradleProperty("useMavenProxy").getOrElse("true") == "true") {
+            maven {
+                url = uri("http://127.0.0.1:8081/")
+                isAllowInsecureProtocol = true
+            }
         }
         google()
         mavenCentral()

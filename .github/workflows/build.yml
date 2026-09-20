@@ -1,0 +1,42 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install required SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "platforms;android-35" "build-tools;34.0.0" "platform-tools"
+
+      - name: Build phone and watch APKs
+        # useMavenProxy=false: the repo's settings.gradle.kts routes Maven
+        # through a local sandbox proxy by default; CI runners have direct
+        # internet access, so the proxy must be switched off here.
+        run: ./gradlew :mobile:assembleDebug :wear:assembleDebug -PuseMavenProxy=false
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bpwatch-apks
+          path: |
+            mobile/build/outputs/apk/debug/*.apk
+            wear/build/outputs/apk/debug/*.apk
