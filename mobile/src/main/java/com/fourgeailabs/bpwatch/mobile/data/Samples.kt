@@ -51,4 +51,15 @@ interface SampleDao {
 
     @Query("SELECT COUNT(*) FROM hr_samples")
     suspend fun hrCount(): Int
+
+    /**
+     * v2.3: latest stress score (0-100) for the Home tile. null = no data.
+     */
+    @Query("SELECT score FROM stress_samples ORDER BY timestamp DESC LIMIT 1")
+    suspend fun latestStressScore(): Int?
+
+    /** v2.3: the newest stress sample, so the dashboard can compare recency
+     * against a stress-bearing BP Reading. */
+    @Query("SELECT * FROM stress_samples ORDER BY timestamp DESC LIMIT 1")
+    suspend fun latestStressSample(): StressSample?
 }

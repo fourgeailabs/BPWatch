@@ -56,7 +56,6 @@ fun HistoryScreen(viewModel: MainViewModel) {
                         supportingContent = {
                             val details = buildList {
                                 r.heartRate?.let { add("${it.toInt()} bpm") }
-                                r.spo2?.let { add("SpO2 $it%") }
                                 r.stress?.let { add("stress $it/100") }
                                 add(formatDateTime(r.timestamp))
                             }.joinToString("  ·  ")

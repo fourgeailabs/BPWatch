@@ -18,8 +18,8 @@ android {
         //   MINOR — new features (continues our v1..v11 iteration count)
         //   PATCH — bug fixes on the current MINOR line
         // versionCode must increase by >= 1 every release for Android.
-        versionCode = 24
-        versionName = "2.2.0"
+        versionCode = 25
+        versionName = "2.3.0"
     }
 
     buildTypes {

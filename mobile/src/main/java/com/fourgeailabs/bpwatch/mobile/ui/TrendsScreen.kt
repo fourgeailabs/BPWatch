@@ -46,7 +46,6 @@ import androidx.compose.ui.unit.sp
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendMetric
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendPoint
-import com.fourgeailabs.bpwatch.mobile.healthconnect.Spo2Sample
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -61,7 +60,6 @@ enum class TrendMetric(val label: String) {
     HEART_RATE("Heart rate"),
     STRESS("Stress"),
     BLOOD_PRESSURE("Blood pressure"),
-    SPO2("Blood oxygen"),
     STEPS("Steps"),
     DISTANCE("Distance"),
     CALORIES("Calories"),
@@ -74,7 +72,7 @@ enum class TrendMetric(val label: String) {
     BMI("BMI"),
 }
 
-/** True for the Health Connect-backed metrics (everything after SpO2, except BMI which is computed from weight). */
+/** True for the Health Connect-backed metrics (STEPS onwards, except BMI which is computed from weight). */
 private fun TrendMetric.isHcTrend(): Boolean = when (this) {
     TrendMetric.STEPS, TrendMetric.DISTANCE, TrendMetric.CALORIES,
     TrendMetric.WEIGHT, TrendMetric.SLEEP, TrendMetric.HYDRATION,
@@ -113,8 +111,8 @@ private data class ChartSeries(
 )
 
 /**
- * v2.0 Trends: history graphs for heart rate, stress, blood pressure and
- * SpO2, with a metric switcher, a range switcher, and min/max/avg summary.
+ * v2.0 Trends: history graphs for heart rate, stress and blood pressure,
+ * with a metric switcher, a range switcher, and min/max/avg summary.
  * v2.1: every home tile deep-links here (initialMetric), an Hour range
  * shows hourly buckets over the last 24h, and steps/distance/calories/
  * weight/sleep/hydration metrics pull bucketed history from Health Connect.
@@ -151,21 +149,15 @@ fun TrendsScreen(
     val readings by viewModel.readings.collectAsState()
     val profile by viewModel.userProfile.collectAsState()
 
-    var spo2 by remember { mutableStateOf<List<Spo2Sample>>(emptyList()) }
     var hcAvailable by remember { mutableStateOf(false) }
-    var spo2Loading by remember { mutableStateOf(false) }
     var hcTrend by remember { mutableStateOf<List<HcTrendPoint>>(emptyList()) }
     var hcTrendLoading by remember { mutableStateOf(false) }
     LaunchedEffect(range, metric) {
-        if (metric == TrendMetric.SPO2) {
-            spo2Loading = true
-            hcAvailable = viewModel.isHcSpO2Available()
-            spo2 = viewModel.loadSpo2Range(
-                Instant.ofEpochMilli(start),
-                Instant.ofEpochMilli(now),
-            )
-            spo2Loading = false
-        } else if (metric.isHcTrend()) {
+        if (metric.isHcTrend()) {
+            // (J) Reset at the start of every load: a fast metric/range
+            // switch must never flash the previous metric's stale data while
+            // the new load is in flight.
+            hcTrend = emptyList()
             hcTrendLoading = true
             hcAvailable = viewModel.isHcTrendsAvailable()
             hcTrend = viewModel.loadHcTrendRange(
@@ -179,6 +171,8 @@ fun TrendsScreen(
         } else if (metric == TrendMetric.BMI) {
             // BMI isn't a Health Connect trend: it's computed from the weight
             // trend plus the profile height, so only the weight trend loads here.
+            // (J) Same reset as above — no stale weight data on fast switches.
+            hcTrend = emptyList()
             hcTrendLoading = true
             hcAvailable = viewModel.isHcTrendsAvailable()
             hcTrend = viewModel.loadHcTrendRange(
@@ -192,7 +186,7 @@ fun TrendsScreen(
         }
     }
 
-    val series: List<ChartSeries> = remember(metric, range, hrSamples, stressSamples, readings, spo2, hcTrend, profile, start, now) {
+    val series: List<ChartSeries> = remember(metric, range, hrSamples, stressSamples, readings, hcTrend, profile, start, now) {
         // Hour range: dense watch samples collapse to hourly averages;
         // sparse metrics just show their sparse points.
         val hrPoints = hrSamples.map { ChartPoint(it.timestamp, it.bpm) }
@@ -241,14 +235,6 @@ fun TrendsScreen(
                     ),
                 )
             }
-            TrendMetric.SPO2 -> listOf(
-                ChartSeries(
-                    label = "Blood oxygen",
-                    color = Color(0xFF0B8043),
-                    unit = "%",
-                    points = spo2.map { ChartPoint(it.timestamp, it.spo2.toFloat()) },
-                )
-            )
             TrendMetric.STEPS -> hcSeries("Steps", Color(0xFF1A73E8), "", hcTrend)
             TrendMetric.DISTANCE -> hcSeries("Distance", Color(0xFF9334E6), "mi", hcTrend)
             TrendMetric.CALORIES -> hcSeries("Calories", Color(0xFFEA8600), "kcal", hcTrend)
@@ -324,9 +310,9 @@ fun TrendsScreen(
         }
 
         val hasData = series.any { it.points.isNotEmpty() }
-        val hcLoading = spo2Loading || hcTrendLoading
+        val hcLoading = hcTrendLoading
         when {
-            (metric == TrendMetric.SPO2 || metric.isHcTrend()) && !hcAvailable && !hcLoading -> {
+            metric.isHcTrend() && !hcAvailable && !hcLoading -> {
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -338,10 +324,7 @@ fun TrendsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            when (metric) {
-                                TrendMetric.SPO2 -> "Blood oxygen history lives in Health Connect"
-                                else -> "${metric.label} history lives in Health Connect"
-                            },
+                            "${metric.label} history lives in Health Connect",
                             style = MaterialTheme.typography.titleSmall,
                         )
                         Text(
@@ -350,10 +333,7 @@ fun TrendsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Button(onClick = {
-                            onRequestHcPermissions(
-                                if (metric == TrendMetric.SPO2) viewModel.hcReadPermissions
-                                else viewModel.hcPermissions
-                            )
+                            onRequestHcPermissions(viewModel.hcPermissions)
                         }) {
                             Text("Connect Health Connect")
                         }

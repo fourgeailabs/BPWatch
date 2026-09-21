@@ -24,8 +24,31 @@ object WatchState {
     private val _liveHr = MutableStateFlow(0f)
     val liveHr: StateFlow<Float> = _liveHr
 
+    /**
+     * Latest measured HR (manual, phone-triggered or scheduled check),
+     * restored from prefs on launch so the home screen never opens empty
+     * (v2.3, K). 0 bpm / 0 ts when no measurement has ever been taken.
+     */
+    private val _latestHrBpm = MutableStateFlow(0f)
+    val latestHrBpm: StateFlow<Float> = _latestHrBpm
+    private val _latestHrTs = MutableStateFlow(0L)
+    val latestHrTs: StateFlow<Long> = _latestHrTs
+
+    /** True while the watch believes it is off-wrist (v2.3). */
+    private val _offBody = MutableStateFlow(false)
+    val offBody: StateFlow<Boolean> = _offBody
+
     fun onEstimate(sys: Int, dia: Int, timestamp: Long) {
         _lastEstimate.value = BpEstimate(sys, dia, timestamp)
+    }
+
+    fun onLatestHr(bpm: Float, timestamp: Long) {
+        _latestHrBpm.value = bpm
+        _latestHrTs.value = timestamp
+    }
+
+    fun onOffBody(paused: Boolean) {
+        _offBody.value = paused
     }
 
     fun onCalibration(calibrated: Boolean) {
@@ -49,5 +72,9 @@ object WatchState {
         WatchSettings.loadEstimate(context)?.let { _lastEstimate.value = it }
         _calibrated.value = WatchSettings.isCalibrated(context)
         _monitorConfig.value = WatchSettings.getMonitorConfig(context)
+        // (K) Home shows the latest BP + HR immediately on launch — the
+        // stored values render instantly, live updates replace them.
+        _latestHrBpm.value = WatchSettings.loadLatestHr(context)
+        _latestHrTs.value = WatchSettings.loadLatestHrTs(context)
     }
 }

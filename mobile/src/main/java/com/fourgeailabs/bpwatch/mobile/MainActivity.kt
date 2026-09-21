@@ -49,11 +49,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
+import com.fourgeailabs.bpwatch.mobile.ui.AboutScreen
 import com.fourgeailabs.bpwatch.mobile.ui.BpWatchTheme
 import com.fourgeailabs.bpwatch.mobile.ui.CalibrateScreen
+import com.fourgeailabs.bpwatch.mobile.ui.ChangelogScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HistoryScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HomeScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SettingsScreen
+import com.fourgeailabs.bpwatch.mobile.ui.SnoreScreen
 import com.fourgeailabs.bpwatch.mobile.ui.TrendMetric
 import com.fourgeailabs.bpwatch.mobile.ui.TrendsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.WatchInstallScreen
@@ -80,6 +83,14 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { /* best effort — estimates still land in History */ }
 
+    // v2.3 snore detection: runtime microphone permission, requested from
+    // the Settings toggle when the user opts in.
+    private val micPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.onMicPermissionResult(granted)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         installCrashRecorder()
@@ -97,6 +108,14 @@ class MainActivity : ComponentActivity() {
                         } catch (t: Throwable) {
                             Log.e("BpWatch", "HC: permission launch failed", t)
                             Toast.makeText(this, "Permission request failed: ${t.message}", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    onRequestMicPermission = {
+                        try {
+                            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        } catch (t: Throwable) {
+                            Log.e("BpWatch", "Mic: permission launch failed", t)
+                            Toast.makeText(this, "Microphone request failed: ${t.message}", Toast.LENGTH_LONG).show()
                         }
                     },
                     crashReport = lastCrashReport,
@@ -188,11 +207,13 @@ class MainActivity : ComponentActivity() {
 private fun BpWatchPhoneApp(
     viewModel: MainViewModel,
     onRequestHcPermissions: (Set<String>) -> Unit,
+    onRequestMicPermission: () -> Unit,
     crashReport: String?,
     onDismissCrashReport: () -> Unit,
 ) {
     val context = LocalContext.current
-    // 0..3 = bottom tabs, 4 = Calibrate page (opened from Home, not a tab).
+    // 0..3 = bottom tabs, 4 = Settings page, 5 = Calibrate page, 6 = Snore
+    // detail page (all opened from Home, not tabs).
     var selected by remember { mutableIntStateOf(0) }
     // Deep-link target for the Trends tab: a home tile sets this, then the
     // tab switch opens Trends with the metric preselected (Week range is
@@ -283,14 +304,23 @@ private fun BpWatchPhoneApp(
 
     Scaffold(
         topBar = {
-            if (selected == 5) {
+            if (selected == 5 || selected == 6 || selected == 7 || selected == 8) {
                 MediumTopAppBar(
-                    title = { Text("Calibrate") },
+                    title = {
+                        Text(
+                            when (selected) {
+                                5 -> "Calibrate"
+                                6 -> "Snoring"
+                                7 -> "About"
+                                else -> "What's new"
+                            }
+                        )
+                    },
                     navigationIcon = {
-                        IconButton(onClick = { selected = 0 }) {
+                        IconButton(onClick = { selected = if (selected == 7 || selected == 8) 4 else 0 }) {
                             Icon(
                                 Icons.Filled.ArrowBack,
-                                contentDescription = "Back to Home",
+                                contentDescription = "Back",
                             )
                         }
                     },
@@ -318,6 +348,7 @@ private fun BpWatchPhoneApp(
                     onOpenWatch = { selected = 3 },
                     onOpenSettings = { selected = 4 },
                     onOpenTrends = { metric -> trendsInitial = metric; selected = 1 },
+                    onOpenSnore = { selected = 6 },
                 )
                 1 -> TrendsScreen(
                     viewModel,
@@ -327,8 +358,17 @@ private fun BpWatchPhoneApp(
                 )
                 2 -> HistoryScreen(viewModel)
                 3 -> WatchInstallScreen()
-                4 -> SettingsScreen(viewModel, onRequestHcPermissions)
+                4 -> SettingsScreen(
+                    viewModel,
+                    onRequestHcPermissions,
+                    onRequestMicPermission,
+                    onOpenAbout = { selected = 7 },
+                    onOpenChangelog = { selected = 8 },
+                )
                 5 -> CalibrateScreen(viewModel)
+                6 -> SnoreScreen(viewModel)
+                7 -> AboutScreen()
+                8 -> ChangelogScreen()
             }
         }
     }

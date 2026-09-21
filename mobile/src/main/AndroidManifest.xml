@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Health Connect: import SpO2, read/write blood pressure,
+    <!-- Health Connect: read/write blood pressure,
          plus the v2.0 dashboard reads and "+ Log" writes. -->
-    <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
     <uses-permission android:name="android.permission.health.READ_BLOOD_PRESSURE" />
     <uses-permission android:name="android.permission.health.WRITE_BLOOD_PRESSURE" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
@@ -38,6 +37,19 @@
     <!-- Extreme watch alerts take over the screen with a full-screen intent -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- v2.3 snore detection: overnight microphone foreground service.
+         RECORD_AUDIO is runtime-requested from the Settings toggle.
+         The microphone <uses-feature> is required="false" so phones without
+         one aren't filtered out of the Play listing — the feature degrades
+         gracefully via SnoreService.canRun instead. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
 
     <!-- Health Connect: package visibility is required on Android 11+ for the
          permission request to resolve. Without this the Connect button fails
@@ -105,5 +117,30 @@
                     android:pathPrefix="/bpwatch" />
             </intent-filter>
         </service>
+
+        <!-- v2.3 snore detection: overnight microphone foreground service.
+             The 22:00 alarm attempts the start (it succeeds when the app is
+             open or on pre-14 OS versions; Android 14+ blocks background
+             microphone starts, so opening the app during the window or the
+             Settings "Start listening now" button starts it instead). -->
+        <service
+            android:name="com.fourgeailabs.bpwatch.mobile.snore.SnoreService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+        <receiver
+            android:name="com.fourgeailabs.bpwatch.mobile.snore.SnoreAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.fourgeailabs.bpwatch.mobile.SNORE_START" />
+                <action android:name="com.fourgeailabs.bpwatch.mobile.SNORE_STOP" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.fourgeailabs.bpwatch.mobile.snore.SnoreBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

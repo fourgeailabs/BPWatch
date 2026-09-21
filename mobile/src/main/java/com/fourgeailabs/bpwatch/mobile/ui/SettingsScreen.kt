@@ -1,5 +1,6 @@
 package com.fourgeailabs.bpwatch.mobile.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,10 +15,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
@@ -59,18 +63,25 @@ import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationEngine
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringConfig
 import com.fourgeailabs.bpwatch.mobile.profile.UserProfile
+import com.fourgeailabs.bpwatch.mobile.snore.SnoreScheduler
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: MainViewModel,
     onRequestHealthConnectPermissions: (Set<String>) -> Unit,
+    onRequestMicPermission: () -> Unit,
+    onOpenAbout: () -> Unit,
+    onOpenChangelog: () -> Unit,
 ) {
     val model by viewModel.calibrationModel.collectAsState()
     val points by viewModel.calibrationPoints.collectAsState()
     val profile by viewModel.userProfile.collectAsState()
     val monitoring by viewModel.monitoringConfig.collectAsState()
     val recordHr by viewModel.recordHr.collectAsState()
+    val snoreEnabled by viewModel.snoreEnabled.collectAsState()
+    val snoreStatus by viewModel.snoreStatus.collectAsState()
+    val snoreListening by viewModel.snoreListening.collectAsState()
 
     Column(
         modifier = Modifier
@@ -92,11 +103,9 @@ fun SettingsScreen(
                 hcStatusText = viewModel.hcStatusText,
                 hcNeedsUpdate = viewModel.hcNeedsUpdate,
                 hcGrantedSet = viewModel.hcGrantedSet,
-                spo2Diagnostic = viewModel.spo2Diagnostic,
                 hcPermissions = viewModel.hcPermissions,
                 hcReadPermissions = viewModel.hcReadPermissions,
                 onRequestPermissions = onRequestHealthConnectPermissions,
-                onRefresh = { viewModel.refreshHealthConnect() },
             )
         }
 
@@ -106,6 +115,21 @@ fun SettingsScreen(
                 onUpdate = { viewModel.updateMonitoring(it) },
                 recordHr = recordHr,
                 onRecordHrChange = { viewModel.setRecordHr(it) },
+            )
+        }
+
+        // v2.3: overnight snore detection on the phone microphone. Opt-in,
+        // default off; the Settings copy says plainly that the mic records
+        // overnight and that it costs battery.
+        SettingsSection(title = "Sleep", icon = Icons.Filled.Bedtime) {
+            SnoreCard(
+                enabled = snoreEnabled,
+                listening = snoreListening,
+                status = snoreStatus,
+                onToggle = { viewModel.onSnoreToggle(it) },
+                onStartNow = { viewModel.startSnoreNow() },
+                onRequestMicPermission = onRequestMicPermission,
+                isMicGranted = { viewModel.isMicGranted() },
             )
         }
 
@@ -136,6 +160,66 @@ fun SettingsScreen(
         }
 
         SettingsSection(title = "About", icon = Icons.Filled.Info) {
+            ListItem(
+                headlineContent = {
+                    Text("About BPWatch", style = MaterialTheme.typography.titleSmall)
+                },
+                supportingContent = {
+                    Text(
+                        "Version, credits and links",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                leadingContent = {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                },
+                trailingContent = {
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenAbout),
+            )
+            ListItem(
+                headlineContent = {
+                    Text("What's new", style = MaterialTheme.typography.titleSmall)
+                },
+                supportingContent = {
+                    Text(
+                        "Release history, newest first",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                leadingContent = {
+                    Icon(
+                        Icons.Filled.NewReleases,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                },
+                trailingContent = {
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenChangelog),
+            )
             ElevatedCard(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.elevatedCardColors(
@@ -312,11 +396,9 @@ private fun SamsungHealthCard(
     hcStatusText: String,
     hcNeedsUpdate: Boolean,
     hcGrantedSet: Set<String>,
-    spo2Diagnostic: String,
     hcPermissions: Set<String>,
     hcReadPermissions: Set<String>,
     onRequestPermissions: (Set<String>) -> Unit,
-    onRefresh: () -> Unit,
 ) {
     val context = LocalContext.current
     val hcInstalled = remember {
@@ -336,7 +418,7 @@ private fun SamsungHealthCard(
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Samsung Health", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "SpO2 and watch data via Samsung Health → Health Connect",
+                        "Watch data via Samsung Health → Health Connect",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -412,16 +494,6 @@ private fun SamsungHealthCard(
                 }
             }
 
-            // SpO2 diagnostic: record count from the last 7 days, or why
-            // there are none. Updates on every refresh.
-            if (spo2Diagnostic.isNotEmpty()) {
-                Text(
-                    text = spo2Diagnostic,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
             if (samsungInstalled) {
                 OutlinedButton(
                     onClick = { HealthConnectManager.openSamsungHealth(context) },
@@ -470,14 +542,6 @@ private fun SamsungHealthCard(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Health Connect settings")
-                }
-            }
-            if (hcGranted) {
-                OutlinedButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Refresh SpO2 now")
                 }
             }
         }
@@ -717,4 +781,78 @@ private fun ThresholdField(
         singleLine = true,
         modifier = modifier.onFocusChanged { if (!it.isFocused) commit() },
     )
+}
+
+/**
+ * Snore detection (v2.3): opt-in overnight listening on the phone
+ * microphone. The copy is explicit that the microphone records overnight
+ * and that it costs extra battery, and that clips stay on the phone.
+ */
+@Composable
+private fun SnoreCard(
+    enabled: Boolean,
+    listening: Boolean,
+    status: String?,
+    onToggle: (Boolean) -> Unit,
+    onStartNow: () -> Unit,
+    onRequestMicPermission: () -> Unit,
+    isMicGranted: () -> Boolean,
+) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TintedIcon(icon = Icons.Filled.Bedtime, contentDescription = null)
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text("Snore detection", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Listens with the microphone from 22:00 to 07:00. " +
+                            "Uses extra battery overnight.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { want ->
+                        if (want && !isMicGranted()) {
+                            onRequestMicPermission()
+                        } else {
+                            onToggle(want)
+                        }
+                    },
+                )
+            }
+            if (enabled && !listening) {
+                // Manual start only makes sense inside the overnight window;
+                // outside it the status line already says when listening begins.
+                val inWindow = remember { SnoreScheduler.inWindow() }
+                if (inWindow) {
+                    OutlinedButton(onClick = onStartNow, modifier = Modifier.fillMaxWidth()) {
+                        Text("Start listening now")
+                    }
+                }
+            }
+            if (status != null) {
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                "Clips stay on this phone — nothing is sent or uploaded anywhere else.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

@@ -5,8 +5,9 @@ import kotlin.math.sqrt
 /**
  * Experimental stress estimate (0-100) from heart-rate samples.
  *
- * This is NOT a medical measurement. The Galaxy Watch's stress sensor is
- * proprietary to Samsung Health and not exposed to third-party apps, so this
+ * This is NOT a medical measurement. The built-in stress sensors on
+ * watches like the Galaxy Watch are proprietary to the manufacturer's
+ * health app and not exposed to third-party apps, so this
  * derives a rough proxy from two signals available during a 30-second
  * measurement:
  *

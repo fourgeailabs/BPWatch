@@ -18,12 +18,21 @@ object HrMeasurement {
         val averageHr: Float,
         /** Raw bpm samples (for stress estimation). */
         val samples: List<Float>,
+        /**
+         * True when the hardware off-body sensor explicitly reported
+         * off-body during this run (v2.3). Callers should treat this as
+         * "watch not on wrist" and skip recording/alerts.
+         */
+        val offBody: Boolean = false,
     )
 
     /** @return the measurement, or null if no valid samples. */
     suspend fun measure(context: Context, durationMs: Long = DURATION_MS): Result? {
         val monitor = HeartRateMonitor(context)
         if (!monitor.available) return null
+        // Start the hardware off-body sensor alongside the HR sensor when
+        // present — its lastState is authoritative for this window.
+        val offBodySensor = OffBodySensor(context)
         val samples = mutableListOf<Float>()
         val thread = HandlerThread("bpwatch-hr").apply { start() }
         try {
@@ -31,9 +40,11 @@ object HrMeasurement {
                 if (hr > 0f) samples.add(hr)
             }
             monitor.start(Handler(thread.looper))
+            if (offBodySensor.present) offBodySensor.start(Handler(thread.looper))
             delay(durationMs)
         } finally {
             monitor.stop()
+            offBodySensor.stop()
             thread.quitSafely()
         }
         val valid = samples.filter { it in 25f..250f }
@@ -41,6 +52,7 @@ object HrMeasurement {
         return Result(
             averageHr = valid.average().toFloat(),
             samples = valid,
+            offBody = offBodySensor.lastState == false,
         )
     }
 }

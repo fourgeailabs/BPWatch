@@ -29,6 +29,30 @@ object Link {
      */
     const val PATH_ALERT = "/bpwatch/alert"
 
+
+    // ------------------------------------------------------------------
+    // Phone-triggered BP check (v2.3). The phone app can ask the watch to
+    // take a measurement instead of waiting for the watch's own UI or its
+    // schedule. The watch runs the same sampling routine its UI uses and
+    // sends the HR reading on PATH_HR_READING; the estimate still flows
+    // back on PATH_BP_ESTIMATE via the normal pipeline.
+    // ------------------------------------------------------------------
+    /**
+     * Phone -> watch: "take a BP check now". Payload: KEY_TIMESTAMP (the
+     * phone's request time, so the phone can match the result). The watch
+     * replies on PATH_BP_RESULT ("started" or "failed").
+     */
+    const val PATH_BP_REQUEST = "/bpwatch/bp_request"
+    /**
+     * Watch -> phone: outcome of a PATH_BP_REQUEST. Payload: KEY_BP_RESULT
+     * ("started" | "failed") + KEY_BP_MESSAGE for human-readable detail.
+     * "started" means a measurement is running - the estimate arrives on
+     * PATH_BP_ESTIMATE through the normal HR-reading pipeline.
+     */
+    const val PATH_BP_RESULT = "/bpwatch/bp_result"
+    const val KEY_BP_RESULT = "bp_result"
+    const val KEY_BP_MESSAGE = "bp_message"
+
     // ------------------------------------------------------------------
     // One-tap watch updater (v1.15+): the phone sends the bundled watch APK
     // over the Data Layer — no Wi-Fi debugging needed. The watch installs
@@ -136,6 +160,7 @@ object Link {
     const val KEY_STEPS = "steps"
     const val KEY_STEP_DATE = "step_date"
 
+
     const val KEY_ALERT_TYPE = "alert_type"
     const val KEY_SEVERITY = "severity"
     const val KEY_ALERT_TITLE = "alert_title"
@@ -145,7 +170,6 @@ object Link {
     const val KEY_TIMESTAMP = "timestamp"
     const val KEY_SYS = "sys"
     const val KEY_DIA = "dia"
-    const val KEY_SPO2 = "spo2"
     const val KEY_STRESS = "stress"
     const val KEY_RESTING_HR = "resting_hr"
     const val KEY_CALIBRATED = "calibrated"

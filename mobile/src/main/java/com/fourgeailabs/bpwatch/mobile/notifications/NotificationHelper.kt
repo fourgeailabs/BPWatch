@@ -19,12 +19,49 @@ import java.time.format.DateTimeFormatter
 /**
  * Posts a notification when a new BP estimate lands from the watch, with
  * every health detail available at scan time: BP estimate, heart rate,
- * stress score, SpO2 (from Health Connect / Samsung Health), and time.
- * Tapping it opens the app for review.
+ * stress score, and time. Tapping it opens the app for review.
  */
 object NotificationHelper {
     private const val CHANNEL_ID = "bpwatch_results"
     private const val NOTIFICATION_ID = 1001
+
+    // --- Snore detection (v2.3): low-importance channel for the overnight
+    // foreground-service notification. No alerts, no sound, no vibration.
+    private const val SNORE_CHANNEL_ID = "bpwatch_snore"
+
+    fun ensureSnoreChannel(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (manager.getNotificationChannel(SNORE_CHANNEL_ID) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(
+                SNORE_CHANNEL_ID,
+                "Snore detection",
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = "Shows while BPWatch listens for snoring overnight (22:00–07:00)."
+            }
+        )
+    }
+
+    /** Ongoing notification for the snore-detection foreground service. */
+    fun snoreNotification(context: Context): android.app.Notification {
+        ensureSnoreChannel(context)
+        val openIntent = PendingIntent.getActivity(
+            context,
+            0,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0),
+        )
+        return NotificationCompat.Builder(context, SNORE_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Listening for snores")
+            .setContentText("Snore detection is on until 07:00")
+            .setOngoing(true)
+            .setContentIntent(openIntent)
+            .build()
+    }
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -46,7 +83,6 @@ object NotificationHelper {
         val dia: Int,
         val heartRate: Float,
         val stress: Int?, // 0-100, null when unknown
-        val spo2: Int?, // %, null when unknown
         val timestamp: Long,
     )
 
@@ -59,7 +95,6 @@ object NotificationHelper {
         val bits = mutableListOf<String>()
         bits.add("${details.heartRate.toInt()} bpm")
         details.stress?.let { bits.add("stress $it/100") }
-        details.spo2?.let { bits.add("SpO2 $it%") }
         bits.add(time)
         val line2 = bits.joinToString(" · ")
 

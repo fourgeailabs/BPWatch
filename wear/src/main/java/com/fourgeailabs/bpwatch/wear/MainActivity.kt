@@ -92,6 +92,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // (K) Estimates/readings can land while the UI was paused or dead —
+        // re-seed from storage so the home screen always shows the latest.
+        try {
+            WatchState.restoreFromPrefs(this)
+        } catch (_: Exception) {
+        }
+    }
+
     private fun ensureBodySensorPermission() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.BODY_SENSORS) !=
             PackageManager.PERMISSION_GRANTED
@@ -120,7 +130,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class UiState { IDLE, MEASURING, SENDING, DONE, ERROR }
+private enum class UiState { IDLE, MEASURING, SENDING, DONE, ERROR, OFF_BODY }
 
 private const val MEASURE_DURATION_MS = 30_000L
 
@@ -151,6 +161,11 @@ private fun BpWatchApp(
     val calibrated by WatchState.calibrated.collectAsState()
     val monitorConfig by WatchState.monitorConfig.collectAsState()
     val liveContinuousHr by WatchState.liveHr.collectAsState()
+    val offBody by WatchState.offBody.collectAsState()
+    // (K) Latest measured HR restored from storage — shown on launch so the
+    // home screen never opens empty; live updates replace it when they come.
+    val latestHrBpm by WatchState.latestHrBpm.collectAsState()
+    val latestHrTs by WatchState.latestHrTs.collectAsState()
     val scope = rememberCoroutineScope()
 
     /**
@@ -206,10 +221,19 @@ private fun BpWatchApp(
             monitor.stop()
             val valid = samples.filter { it in 25f..250f }
             if (valid.isEmpty()) {
-                errorMessage = "Couldn't get a steady reading. Stay still and keep the watch snug, then try again."
-                uiState = UiState.ERROR
+                // Off-wrist heuristic (v2.3): repeated empty manual runs
+                // mean the watch isn't being worn — show the off-wrist
+                // state instead of a generic error.
+                val streak = OffBodyDetector.noteEmptyAttempt(appContext)
+                if (streak >= OffBodyDetector.EMPTY_ATTEMPTS_THRESHOLD) {
+                    uiState = UiState.OFF_BODY
+                } else {
+                    errorMessage = "Couldn't get a steady reading. Stay still and keep the watch snug, then try again."
+                    uiState = UiState.ERROR
+                }
                 return@launch
             }
+            OffBodyDetector.noteValidSignal(appContext)
             val avg = valid.average().toFloat()
             uiState = UiState.SENDING
             sentHr = avg
@@ -229,6 +253,20 @@ private fun BpWatchApp(
                 System.currentTimeMillis(),
                 stress,
             )
+            // Persist for the watch-face complications and the home screen,
+            // and nudge the complications to refresh, whether or not the
+            // phone was reachable.
+            val measuredAt = System.currentTimeMillis()
+            try {
+                WatchSettings.saveLatestHr(monitor.appContext, avg, measuredAt)
+                WatchSettings.saveLatestStress(monitor.appContext, stress)
+                WatchState.onLatestHr(avg, measuredAt)
+            } catch (_: Exception) {
+            }
+            try {
+                ComplicationUpdater.requestUpdate(monitor.appContext)
+            } catch (_: Exception) {
+            }
             if (ok) {
                 uiState = UiState.DONE
             } else {
@@ -322,6 +360,18 @@ private fun BpWatchApp(
                             )
                         }
                     }
+                    // Off-wrist banner (v2.3): background checks are paused
+                    // while the watch isn't being worn — no stale numbers.
+                    if (offBody) {
+                        item {
+                            Text(
+                                text = "⌚ Off wrist — checks paused",
+                                style = MaterialTheme.typography.caption2,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                            )
+                        }
+                    }
                     item { Spacer(Modifier.height(24.dp)) }
                     item {
                         // The reading is the hero: dead centre of the display.
@@ -368,6 +418,15 @@ private fun BpWatchApp(
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = "♥ ${liveContinuousHr.toInt()} bpm",
+                                    style = MaterialTheme.typography.title3,
+                                    textAlign = TextAlign.Center,
+                                )
+                            } else if (latestHrBpm > 0f && latestHrTs > 0L) {
+                                // (K) Most recent measured HR, with its age —
+                                // no empty state, no waiting for a fresh read.
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "♥ ${latestHrBpm.toInt()} bpm · ${timeAgo(latestHrTs)}",
                                     style = MaterialTheme.typography.title3,
                                     textAlign = TextAlign.Center,
                                 )
@@ -501,6 +560,37 @@ private fun BpWatchApp(
                                 label = { Text("Try again", textAlign = TextAlign.Center) },
                                 modifier = Modifier.fillMaxWidth(0.85f),
                                 colors = ChipDefaults.primaryChipColors(),
+                            )
+                            Spacer(Modifier.height(24.dp))
+                        }
+                    }
+                }
+
+                UiState.OFF_BODY -> {
+                    // Off-wrist (v2.3): no stale numbers, no retry loop —
+                    // just say the watch isn't being worn.
+                    item {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Spacer(Modifier.height(24.dp))
+                            Text(
+                                text = "⌚ Off wrist",
+                                style = MaterialTheme.typography.title2,
+                                textAlign = TextAlign.Center,
+                            )
+                            Text(
+                                text = "Put the watch on snugly, then try again — checks are paused while it's off your wrist.",
+                                style = MaterialTheme.typography.caption2,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                            )
+                        }
+                    }
+                    item {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Chip(
+                                onClick = { uiState = UiState.IDLE },
+                                label = { Text("Back", textAlign = TextAlign.Center) },
+                                modifier = Modifier.fillMaxWidth(0.85f),
                             )
                             Spacer(Modifier.height(24.dp))
                         }

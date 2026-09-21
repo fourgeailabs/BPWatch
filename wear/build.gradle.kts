@@ -13,8 +13,8 @@ android {
         minSdk = 30 // Wear OS 3+
         targetSdk = 34
         // Kept in sync with :mobile (see its versioning policy comment).
-        versionCode = 24
-        versionName = "2.2.0"
+        versionCode = 25
+        versionName = "2.3.0"
     }
 
     buildTypes {
@@ -57,4 +57,10 @@ dependencies {
     implementation("com.google.android.gms:play-services-wearable:18.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
+    // Watch-face complications (BP / HR / stress, v2.3). ShortText data
+    // comes transitively via watchface-complications-data; the suspending
+    // service base + update requester live in the -ktx artifact, which is
+    // NOT pulled transitively — hence the explicit second line.
+    implementation("androidx.wear.watchface:watchface-complications-data-source:1.2.1")
+    implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.1")
 }

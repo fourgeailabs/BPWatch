@@ -23,6 +23,10 @@ interface ReadingDao {
     @Query("SELECT * FROM readings WHERE source = 'watch' AND heartRate IS NOT NULL ORDER BY timestamp DESC LIMIT 1")
     suspend fun latestWatchReading(): Reading?
 
+    /** v2.3: newest reading carrying a stress score, for the Home stress tile. */
+    @Query("SELECT * FROM readings WHERE stress IS NOT NULL ORDER BY timestamp DESC LIMIT 1")
+    suspend fun latestStressReading(): Reading?
+
     @Insert
     suspend fun insert(reading: Reading): Long
 
@@ -46,8 +50,8 @@ interface HealthLogDao {
 }
 
 @Database(
-    entities = [Reading::class, HealthLog::class, HrSample::class, StressSample::class, WatchSteps::class],
-    version = 5,
+    entities = [Reading::class, HealthLog::class, HrSample::class, StressSample::class, WatchSteps::class, SnoreEvent::class],
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -55,6 +59,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun healthLogDao(): HealthLogDao
     abstract fun sampleDao(): SampleDao
     abstract fun watchStepsDao(): WatchStepsDao
+    abstract fun snoreDao(): SnoreDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -103,6 +108,43 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v2.3, exactly one bump: rebuilds readings without the discontinued
+         * column dropped in v2.3, and creates the snore_events table for
+         * phone-side snore detection. API 26's bundled SQLite has no DROP
+         * COLUMN, so the readings table is rebuilt instead.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE readings_new (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "timestamp INTEGER NOT NULL, " +
+                        "heartRate REAL, " +
+                        "sysCuff INTEGER, " +
+                        "diaCuff INTEGER, " +
+                        "sysEstimate INTEGER, " +
+                        "diaEstimate INTEGER, " +
+                        "stress INTEGER, " +
+                        "source TEXT NOT NULL)"
+                )
+                db.execSQL(
+                    "INSERT INTO readings_new " +
+                        "(id, timestamp, heartRate, sysCuff, diaCuff, sysEstimate, diaEstimate, stress, source) " +
+                        "SELECT id, timestamp, heartRate, sysCuff, diaCuff, sysEstimate, diaEstimate, stress, source " +
+                        "FROM readings"
+                )
+                db.execSQL("DROP TABLE readings")
+                db.execSQL("ALTER TABLE readings_new RENAME TO readings")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS snore_events (" +
+                        "timestamp INTEGER PRIMARY KEY NOT NULL, " +
+                        "durationMs INTEGER NOT NULL, " +
+                        "clipPath TEXT)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -113,7 +155,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "bpwatch.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build().also { INSTANCE = it }
             }
     }

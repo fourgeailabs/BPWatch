@@ -10,7 +10,8 @@ import android.os.Handler
 /**
  * Reads heart rate from the watch's PPG sensor via SensorManager.
  * (Health Services MeasureClient is the fancier path; SensorManager is used
- * here because its API surface is stable and it works on Galaxy Watch.)
+ * here because its API surface is stable and it works on any Wear OS watch
+ * with a heart-rate sensor.)
  */
 class HeartRateMonitor(context: Context) : SensorEventListener {
 

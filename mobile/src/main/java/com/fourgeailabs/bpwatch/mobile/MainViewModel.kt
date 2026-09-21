@@ -1,6 +1,9 @@
 package com.fourgeailabs.bpwatch.mobile
 
 import android.app.Application
+import android.content.Intent
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -12,6 +15,7 @@ import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationPoint
 import com.fourgeailabs.bpwatch.mobile.data.AppDatabase
 import com.fourgeailabs.bpwatch.mobile.data.HealthLog
 import com.fourgeailabs.bpwatch.mobile.data.Reading
+import com.fourgeailabs.bpwatch.mobile.data.SnoreEvent
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendMetric
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendPoint
@@ -20,7 +24,19 @@ import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringConfig
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringPrefs
 import com.fourgeailabs.bpwatch.mobile.profile.ProfileStore
 import com.fourgeailabs.bpwatch.mobile.profile.UserProfile
+import com.fourgeailabs.bpwatch.mobile.snore.SnoreScheduler
+import com.fourgeailabs.bpwatch.mobile.snore.SnoreService
+import com.fourgeailabs.bpwatch.mobile.snore.SnoreState
+import com.fourgeailabs.bpwatch.mobile.snore.SnoreStorage
+import com.fourgeailabs.bpwatch.mobile.wearable.BpCheckState
 import com.fourgeailabs.bpwatch.mobile.wearable.WatchConfigSender
+import com.fourgeailabs.bpwatch.Link
+import com.google.android.gms.wearable.DataMap
+import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.tasks.await
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -49,9 +65,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         repo.calibrationModel.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val userProfile: StateFlow<UserProfile> = profileStore.profile
     val monitoringConfig: StateFlow<MonitoringConfig> = monitoringPrefs.config
-
-    var spo2: Int? by mutableStateOf(null)
-        private set
     var hcAvailable: Boolean by mutableStateOf(hc.isAvailable)
         private set
     var hcGranted: Boolean by mutableStateOf(false)
@@ -68,14 +81,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Permission strings Health Connect itself reports as granted (v2.2). */
     var hcGrantedSet: Set<String> by mutableStateOf(emptySet())
         private set
-    /**
-     * SpO2 diagnostic line for Settings, e.g. "SpO2 records (7d): 14 ·
-     * newest 2h ago" or why there are none. Empty when Health Connect isn't
-     * readable yet.
-     */
-    var spo2Diagnostic: String by mutableStateOf("")
-        private set
     var latestWatchHr: Float? by mutableStateOf(null)
+        private set
+
+    // ------------------------------------------------------------------
+    // v2.3 snore detection: phone microphone, overnight 22:00–07:00 window.
+    // ------------------------------------------------------------------
+    val snoreEnabled: StateFlow<Boolean> = monitoringPrefs.snoreDetection
+    val snoreStatus: StateFlow<String?> = SnoreState.status
+    val snoreListening: StateFlow<Boolean> = SnoreState.listening
+    /** Last night's (22:00–07:00) snore count; null = not loaded yet. */
+    var lastNightSnoreCount: Int? by mutableStateOf(null)
         private set
 
     // ------------------------------------------------------------------
@@ -99,6 +115,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         refreshHealthConnect()
         refreshLatestWatchHr()
         refreshDashboard()
+        // v2.3 snore detection: prune old clips on app start, keep the
+        // 22:00/07:00 alarms armed (the OS clears them on reboot), and start
+        // listening when the feature is on and we're inside the window.
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                SnoreStorage.prune(getApplication())
+            } catch (_: Exception) {
+            }
+        }
+        SnoreScheduler.ensureScheduled(getApplication())
+        maybeStartSnoreService()
     }
 
     fun refreshHealthConnect() {
@@ -116,40 +143,122 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (_: Exception) {
                 emptySet()
             }
-            // SpO2 reads only need the read grant — never the BP write one.
-            val readGranted = try {
-                hc.isAvailable && hc.hasReadPermissions()
-            } catch (_: Exception) {
-                false
-            }
-            spo2 = try {
-                if (readGranted) hc.readLatestSpo2() else null
-            } catch (_: Exception) {
-                null
-            }
-            spo2Diagnostic = try {
-                when {
-                    !hc.isAvailable -> ""
-                    !readGranted -> "SpO2: read permission not granted yet."
-                    else -> {
-                        val stats = hc.readSpo2Stats()
-                        when {
-                            stats == null -> "SpO2: query timed out — Health Connect isn't responding."
-                            stats.count == 0 -> "SpO2: no records in the last 7 days — " +
-                                "check Samsung Health → Settings → Health Connect sharing, " +
-                                "and turn on “Blood oxygen during sleep”."
-                            else -> "SpO2 records (7d): ${stats.count} · " +
-                                "newest ${stats.newest?.let { timeAgo(it) } ?: "?"}"
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-                "SpO2: couldn't read records."
-            }
         }
     }
 
     fun onHcPermissionResult() = refreshHealthConnect()
+
+    // ------------------------------------------------------------------
+    // v2.3 snore detection controls.
+    // ------------------------------------------------------------------
+
+    fun isMicGranted(): Boolean =
+        try {
+            ContextCompat.checkSelfPermission(
+                getApplication(),
+                android.Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
+        } catch (_: Exception) {
+            false
+        }
+
+    /**
+     * Called from the Settings toggle. Turning on requires microphone
+     * permission and hardware; when the permission isn't granted yet the
+     * toggle stays off and MainActivity launches the runtime request —
+     * [onMicPermissionResult] retries the toggle on grant.
+     */
+    fun onSnoreToggle(want: Boolean) {
+        val app = getApplication<Application>()
+        if (!want) {
+            monitoringPrefs.setSnoreDetection(false)
+            SnoreScheduler.cancel(app)
+            try {
+                app.stopService(Intent(app, SnoreService::class.java))
+            } catch (_: Exception) {
+            }
+            SnoreState.post(null)
+            return
+        }
+        val hasMic = try {
+            app.packageManager.hasSystemFeature(PackageManager.FEATURE_MICROPHONE)
+        } catch (_: Exception) {
+            false
+        }
+        if (!hasMic) {
+            SnoreState.post("Microphone unavailable on this device.")
+            return
+        }
+        if (!isMicGranted()) {
+            SnoreState.post("Microphone permission needed — allow it to start listening.")
+            return
+        }
+        monitoringPrefs.setSnoreDetection(true)
+        SnoreScheduler.schedule(app)
+        SnoreState.post(
+            if (SnoreScheduler.inWindow()) "Listening now — stops at 07:00."
+            else "Scheduled — listening starts at 22:00."
+        )
+        maybeStartSnoreService()
+    }
+
+    /** Result of the runtime microphone permission request from MainActivity. */
+    fun onMicPermissionResult(granted: Boolean) {
+        if (granted) {
+            onSnoreToggle(true)
+        } else {
+            SnoreState.post("Microphone permission denied — snore detection stays off.")
+        }
+    }
+
+    /**
+     * Starts listening right now, from a user action (Settings "Start
+     * listening now" or opening the app during the window). A start from a
+     * visible activity is the one path the OS always allows on Android 14+,
+     * where background microphone service starts are blocked.
+     */
+    fun startSnoreNow() {
+        val app = getApplication<Application>()
+        if (!monitoringPrefs.snoreDetection.value) return
+        if (SnoreService.isRunning) return
+        if (!SnoreService.canRun(app)) {
+            SnoreState.post("Microphone unavailable.")
+            return
+        }
+        try {
+            val intent = Intent(app, SnoreService::class.java).setAction(SnoreScheduler.ACTION_START)
+            ContextCompat.startForegroundService(app, intent)
+            SnoreState.post("Listening now — stops at 07:00.")
+        } catch (_: Exception) {
+            SnoreState.post("Couldn't start listening — try again.")
+        }
+    }
+
+    /**
+     * App-open auto-start: when the feature is on and we're inside the
+     * overnight window, begin listening immediately.
+     */
+    private fun maybeStartSnoreService() {
+        try {
+            if (!monitoringPrefs.snoreDetection.value) return
+            if (!SnoreScheduler.inWindow()) return
+            startSnoreNow()
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Last night's snore events, oldest first — for the Snore detail screen. */
+    suspend fun snoreEventsLastNight(): List<SnoreEvent> =
+        try {
+            val (nightStart, nightEnd) = SnoreScheduler.lastNightWindow()
+            AppDatabase.get(getApplication()).snoreDao().eventsBetween(nightStart, nightEnd)
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+    /** Reactive snore events in [start, end) for the Snore charts. */
+    fun observeSnoreEvents(start: Long, end: Long) =
+        repo.snoreDao.observeBetween(start, end)
 
     /**
      * (Re)loads today's Health Connect metrics for the dashboard tiles.
@@ -157,6 +266,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun refreshDashboard() {
         viewModelScope.launch {
+            // v2.3 Home snoring card: last night's 22:00–07:00 snore count.
+            // Room-local, so it loads whether or not Health Connect is set up.
+            lastNightSnoreCount = try {
+                val (nightStart, nightEnd) = SnoreScheduler.lastNightWindow()
+                AppDatabase.get(getApplication()).snoreDao()
+                    .countBetween(nightStart, nightEnd)
+            } catch (_: Exception) {
+                null
+            }
             val readGranted = try {
                 hc.isAvailable && hc.hasDashboardReads()
             } catch (_: Exception) {
@@ -168,11 +286,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val t: TodayMetrics? = try {
                 hc.readTodayMetrics()
-            } catch (_: Exception) {
-                null
-            }
-            val spo2Now = try {
-                hc.readLatestSpo2()
             } catch (_: Exception) {
                 null
             }
@@ -205,6 +318,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 bmi < 30.0 -> "Overweight"
                 else -> "Obese"
             }
+            // v2.3 Home stress tile: the newest available score between the
+            // recorded stress samples and the newest stress-bearing Reading.
+            // Nothing faked — null when both are empty.
+            val stress = try {
+                val db = AppDatabase.get(getApplication())
+                val sample = db.sampleDao().latestStressSample()
+                val reading = db.readingDao().latestStressReading()
+                when {
+                    sample == null && reading == null -> null
+                    reading == null -> sample?.score
+                    sample == null -> reading.stress
+                    else -> if (sample.timestamp >= reading.timestamp) {
+                        sample.score
+                    } else {
+                        reading.stress
+                    }
+                }
+            } catch (_: Exception) {
+                null
+            }
             _dashboard.value = DashboardMetrics(
                 steps = watchStepsToday ?: t?.steps,
                 distanceMi = t?.distanceMeters?.let { it / 1609.344 },
@@ -213,7 +346,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 weightLb = t?.weightKg?.let { it * 2.20462 },
                 sleepHours = t?.sleepHours,
                 hydrationMl = t?.hydrationLiters?.let { it * 1000.0 },
-                spo2 = spo2Now,
+                stress = stress,
                 bmi = bmi,
                 bmiLabel = bmiLabel,
                 hcReadGranted = true,
@@ -301,7 +434,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Merges BP readings and manual logs into day groups, newest first.
-     * Only readings with an actual BP value appear (pure HR/SpO2 rows live
+     * Only readings with an actual BP value appear (pure HR rows live
      * in the History tab).
      */
     private fun buildTimeline(
@@ -381,13 +514,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.clearCalibration() }
     }
 
-    fun addManualSpo2(value: Int) {
-        viewModelScope.launch {
-            repo.addManualSpo2(value)
-            spo2 = value
-        }
-    }
-
     fun saveProfile(profile: UserProfile) {
         profileStore.save(profile)
     }
@@ -400,6 +526,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val updated = monitoringPrefs.update(transform)
         viewModelScope.launch {
             WatchConfigSender.sendToAll(getApplication(), updated)
+        }
+    }
+
+    /**
+     * v2.3: phone-triggered BP check. Asks every connected watch to run its
+     * normal 30-second HR sampling headlessly (PATH_BP_REQUEST); the
+     * resulting HR reading flows through PhoneListenerService as usual and
+     * ends the Measuring state. No watch connected: NoWatch immediately.
+     * Never throws from the call site.
+     */
+    fun requestBpCheck() {
+        val now = System.currentTimeMillis()
+        BpCheckState.toMeasuring(now)
+        viewModelScope.launch {
+            try {
+                val nodes = Wearable.getNodeClient(getApplication())
+                    .connectedNodes.await()
+                if (nodes.isEmpty()) {
+                    BpCheckState.toNoWatch()
+                    return@launch
+                }
+                val payload = DataMap().apply {
+                    putLong(Link.KEY_TIMESTAMP, now)
+                }.toByteArray()
+                nodes.forEach { node ->
+                    Wearable.getMessageClient(getApplication())
+                        .sendMessage(node.id, Link.PATH_BP_REQUEST, payload)
+                        .await()
+                }
+            } catch (_: Exception) {
+                BpCheckState.toFailed("Couldn't reach the watch.")
+            }
+        }
+        // Timeout guard: if the watch never answered, say so instead of
+        // spinning the button forever.
+        viewModelScope.launch {
+            delay(90_000)
+            if (BpCheckState.status.value is BpCheckState.Status.Measuring &&
+                BpCheckState.requestTs == now
+            ) {
+                BpCheckState.toFailed("The watch didn't respond in time.")
+            }
         }
     }
 
@@ -431,27 +599,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** True when Health Connect is available and the SpO2 read is granted. */
-    suspend fun isHcSpO2Available(): Boolean = try {
-        hc.isAvailable && hc.hasReadPermissions()
-    } catch (_: Exception) {
-        false
-    }
-
-    /** SpO2 samples over [start, end] for the Trends chart. Empty when Health
-     * Connect isn't usable — never throws. */
-    suspend fun loadSpo2Range(
-        start: java.time.Instant,
-        end: java.time.Instant,
-    ): List<com.fourgeailabs.bpwatch.mobile.healthconnect.Spo2Sample> {
-        return try {
-            if (!isHcSpO2Available()) emptyList()
-            else hc.readSpo2Range(start, end) ?: emptyList()
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
     // ------------------------------------------------------------------
     // Trends (v2.0): recorded-sample ranges for the history graphs.
     // ------------------------------------------------------------------
@@ -469,13 +616,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun isHcTrendsAvailable(): Boolean = try {
         hc.isAvailable && hc.hasDashboardReads()
+    } catch (e: CancellationException) {
+        // (J) Never swallow coroutine cancellation. The TrendsScreen load
+        // effect relaunches on every metric/range switch; a cancelled load
+        // must die here instead of returning a stale value that the dead
+        // effect would then assign over the fresh load's UI state.
+        throw e
     } catch (_: Exception) {
         false
     }
 
     /**
      * Bucketed Health Connect history for a Trends metric. Empty when Health
-     * Connect isn't usable — never throws.
+     * Connect isn't usable — never throws on data errors (coroutine
+     * cancellation still propagates; see (J) below).
      */
     suspend fun loadHcTrendRange(
         metric: HcTrendMetric,
@@ -486,6 +640,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return try {
             if (!isHcTrendsAvailable()) emptyList()
             else hc.readHcTrend(metric, start, end, bucketHours) ?: emptyList()
+        } catch (e: CancellationException) {
+            // (J) Never swallow coroutine cancellation. The TrendsScreen
+            // LaunchedEffect(range, metric) relaunches on every switch,
+            // cancelling the in-flight load; without this rethrow the dead
+            // effect's late emptyList() wins the race against the
+            // replacement load's real data and the chart goes blank.
+            throw e
         } catch (_: Exception) {
             emptyList()
         }
@@ -522,7 +683,8 @@ data class DashboardMetrics(
     val weightLb: Double? = null,
     val sleepHours: Double? = null,
     val hydrationMl: Double? = null,
-    val spo2: Int? = null,
+    /** v2.3: latest stress score 0-100 (samples or a stress-bearing reading). */
+    val stress: Int? = null,
     /** v2.2: derived from profile height + latest weight (HC preferred). */
     val bmi: Double? = null,
     val bmiLabel: String? = null,

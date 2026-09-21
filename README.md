@@ -9,8 +9,7 @@ A two-app system that works around Samsung's lock-in:
   mode (inexact alarm + boot receiver) so estimates survive the UI dying.
 - **Phone app** (`:mobile`) — runs on your Pixel. Receives watch readings,
   estimates blood pressure from **your own cuff calibration**, stores
-  history, charts trends, imports SpO2 via Health Connect, publishes BP
-  estimates back to Health Connect, and can **install/update the watch app
+  history, charts trends, publishes BP estimates back to Health Connect, and can **install/update the watch app
   over Wi-Fi debugging** (no PC needed) — including the full pairing-code
   flow with a from-scratch SPAKE2 implementation.
 
@@ -21,8 +20,8 @@ adjust medication. Always confirm with a cuff.
 
 Samsung's on-watch blood-pressure feature is proprietary: it uses pulse-wave
 analysis plus cuff calibration, and Samsung only enables it when the watch is
-paired to a Samsung phone. Google also restricts SpO2 and HRV sensor data to
-system apps, so no third-party app can read blood oxygen (or blood pressure)
+paired to a Samsung phone. Google restricts HRV sensor data to
+system apps, and blood pressure isn't exposed to third-party apps
 directly from the Galaxy Watch's sensors.
 
 So BPWatch does the next-best honest thing — the same high-level approach as
@@ -35,14 +34,10 @@ Samsung's own feature, minus their proprietary algorithm:
    least-squares line mapping HR → systolic and HR → diastolic.
 3. **Later readings are estimated** through that line. They are wellness
    estimates, not measurements — heart rate alone is a weak predictor of BP.
-4. **SpO2 comes via Health Connect.** The watch app can't read SpO2 directly,
-   but Samsung Health (which runs fine on your Pixel) can record the watch's
-   SpO2 and sync it into Health Connect — the phone app picks it up from
-   there. You can also log SpO2 manually on the Home tab.
 
 ## What's in the phone app
 
-- **Home** — latest estimate, heart rate, SpO2, manual logging.
+- **Home** — latest estimate, heart rate, manual logging.
 - **Calibrate** — cuff calibration points (≥3), least-squares fit.
 - **History** — charts and past readings.
 - **Watch** — update the watch app with one tap: the phone beams the bundled
@@ -88,7 +83,7 @@ bpwatch/
 │       │   └── spake2/           # From-scratch SPAKE2 (BoringSSL transcript)
 │       ├── calibration/           # CalibrationEngine (least-squares fit)
 │       ├── data/                  # Room (Reading), CalibrationStore (DataStore)
-│       ├── healthconnect/         # SpO2 import + BP publishing
+│       ├── healthconnect/         # BP publishing to Health Connect
 │       ├── notifications/         # Upload notification helper
 │       ├── profile/               # Body-profile store
 │       ├── wearable/              # PhoneListenerService (receives watch data)
@@ -127,7 +122,7 @@ Settings footer reads `BuildConfig.VERSION_NAME` dynamically.
 
 ## Health Connect notes
 
-- SpO2 import and BP publishing go through Health Connect
+- BP publishing goes through Health Connect
   (`1.1.0-alpha11`, compileSdk 35).
 - On Android 16, requesting `WRITE_BLOOD_PRESSURE` alongside the read
   permissions can cause the system to cancel the whole permission request
@@ -163,14 +158,6 @@ The `releases/` folder contains ready-to-install debug builds:
    which is also sent back to the watch display and written to Health Connect.
 
 Recalibrate every few weeks, or when medication, fitness, or stress changes.
-
-## SpO2 setup
-
-- **Automatic:** Install Samsung Health on the Pixel, sign in with the same
-  Samsung account as the watch, enable SpO2 measurement on the watch, and turn
-  on Samsung Health's Health Connect sync. Then in BPWatch → Settings →
-  **Connect Health Connect**.
-- **Manual:** Enter a value any time on the Home tab.
 
 ## Roadmap ideas
 

@@ -4,7 +4,7 @@ package com.fourgeailabs.bpwatch.mobile.calibration
  * The honest core of this app.
  *
  * The Galaxy Watch's blood-pressure feature is Samsung-proprietary and only
- * works with Samsung phones. No public API exposes blood pressure (or SpO2)
+ * works with Samsung phones. No public API exposes blood pressure
  * to third-party apps, so instead we do what Samsung's own feature does at a
  * high level: calibrate against a real cuff.
  *

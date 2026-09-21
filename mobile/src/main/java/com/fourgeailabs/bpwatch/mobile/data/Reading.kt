@@ -9,8 +9,7 @@ import androidx.room.PrimaryKey
  * A record can come from several sources:
  * - "watch": heart rate measured on the Galaxy Watch, BP estimated from calibration
  * - "cuff":  a calibration point (cuff reading + simultaneous watch heart rate)
- * - "manual": hand-entered BP / SpO2
- * - "health_connect": SpO2 imported from Health Connect
+ * - "manual": hand-entered BP
  */
 @Entity(tableName = "readings")
 data class Reading(
@@ -21,7 +20,6 @@ data class Reading(
     val diaCuff: Int? = null,
     val sysEstimate: Int? = null,
     val diaEstimate: Int? = null,
-    val spo2: Int? = null,
     /** Experimental stress score 0-100 from the watch (-1/NULL = unknown). */
     val stress: Int? = null,
     val source: String = "manual",

@@ -46,6 +46,7 @@ class PhoneListenerService : WearableListenerService() {
             Link.PATH_WATCH_INFO -> handleWatchInfo(event)
             Link.PATH_WATCH_CONFIG -> handleWatchConfig(event)
             Link.PATH_CONFIG_REQUEST -> handleConfigRequest(event)
+            Link.PATH_BP_RESULT -> handleBpResult(event)
         }
     }
 
@@ -148,11 +149,43 @@ class PhoneListenerService : WearableListenerService() {
     /**
      * Throttled live heart-rate tick from the watch (manual measurement or
      * continuous monitoring). Updates the in-app live mirror.
+     *
+     * (H) Also persists the tick into hr_samples so HR Trends populates
+     * whenever the watch is streaming, even with the opt-in continuous
+     * recording toggle off (that toggle only fills the table via the
+     * 10-minute PATH_HISTORY_PUSH batches). Ticks arrive ~every 10s, so
+     * writes are throttled to at most one per 60 seconds — minor timestamp
+     * overlap with the batch writer is acceptable, no dedupe.
      */
+    @Volatile
+    private var lastLiveHrPersistedAt = 0L
+
     private fun handleHrLive(event: MessageEvent) {
         try {
             val map = DataMap.fromByteArray(event.data)
-            WatchLiveState.updateLiveHr(map.getFloat(Link.KEY_HEART_RATE))
+            val hr = map.getFloat(Link.KEY_HEART_RATE)
+            WatchLiveState.updateLiveHr(hr)
+            if (hr > 0f) {
+                val now = System.currentTimeMillis()
+                if (now - lastLiveHrPersistedAt >= 60_000L) {
+                    lastLiveHrPersistedAt = now
+                    scope.launch {
+                        try {
+                            BpRepository.get(applicationContext).sampleDao.insertHr(
+                                listOf(
+                                    com.fourgeailabs.bpwatch.mobile.data.HrSample(
+                                        timestamp = now,
+                                        bpm = hr,
+                                        source = "watch",
+                                    )
+                                )
+                            )
+                        } catch (_: Exception) {
+                            // Never crash the listener on a persistence hiccup.
+                        }
+                    }
+                }
+            }
         } catch (_: Exception) {
             // Never crash the listener on a malformed message.
         }
@@ -262,16 +295,6 @@ class PhoneListenerService : WearableListenerService() {
                         // Watch may be out of range; the reading is still stored.
                     }
 
-                    // Latest SpO2 for the notification (best effort). Gated on
-                    // the read permission only — the BP write grant is
-                    // irrelevant to reading SpO2.
-                    val spo2 = try {
-                        val hc = HealthConnectManager(applicationContext)
-                        if (hc.isAvailable && hc.hasReadPermissions()) hc.readLatestSpo2() else null
-                    } catch (_: Exception) {
-                        null
-                    }
-
                     // Notify: new result ready for review, with everything
                     // we know at scan time.
                     try {
@@ -282,7 +305,6 @@ class PhoneListenerService : WearableListenerService() {
                                 dia = dia,
                                 heartRate = hr,
                                 stress = stress,
-                                spo2 = spo2,
                                 timestamp = timestamp,
                             ),
                         )
@@ -297,6 +319,18 @@ class PhoneListenerService : WearableListenerService() {
                         }
                     } catch (_: Exception) {
                     }
+                }
+
+                // v2.3 phone-triggered BP check: the reading that answers our
+                // request ends the Measuring state. Reading timestamps come
+                // from the watch clock while requestTs is phone time, so a
+                // 5-second grace covers small skews. Placed after the estimate
+                // store so the state clears even when the phone isn't
+                // calibrated yet (the watch still took the reading).
+                if (BpCheckState.status.value is BpCheckState.Status.Measuring &&
+                    timestamp >= BpCheckState.requestTs - 5_000
+                ) {
+                    BpCheckState.toIdle()
                 }
 
                 // The watch is fully programmed on every reading (config,
@@ -440,6 +474,30 @@ class PhoneListenerService : WearableListenerService() {
                 }
             } catch (_: Exception) {
             }
+        }
+    }
+
+    /**
+     * v2.3: the watch answered a phone-triggered BP check. "started" means it
+     * is sampling now — Measuring stays on until the HR reading arrives (or
+     * the ViewModel's 90-second timeout fires). "failed" carries the detail
+     * in KEY_BP_MESSAGE.
+     */
+    private fun handleBpResult(event: MessageEvent) {
+        try {
+            if (BpCheckState.status.value !is BpCheckState.Status.Measuring) return
+            val map = DataMap.fromByteArray(event.data)
+            val result = map.getString(Link.KEY_BP_RESULT).orEmpty()
+            val message = map.getString(Link.KEY_BP_MESSAGE).orEmpty()
+            when (result) {
+                "failed" -> BpCheckState.toFailed(
+                    message.ifEmpty { "The watch couldn't take a reading." }
+                )
+                // "started" — deliberately a no-op: the incoming HR reading
+                // ends the Measuring state.
+            }
+        } catch (_: Exception) {
+            // Never crash the listener on a malformed message.
         }
     }
 

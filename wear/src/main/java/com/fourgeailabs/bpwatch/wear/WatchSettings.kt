@@ -88,6 +88,56 @@ object WatchSettings {
     }
 
     // ------------------------------------------------------------------
+    // Latest readings for the watch-face complications (v2.3).
+    // ------------------------------------------------------------------
+
+    private const val KEY_LATEST_HR = "latest_hr_bpm"
+    private const val KEY_LATEST_HR_TS = "latest_hr_ts"
+    private const val KEY_LATEST_STRESS = "latest_stress_score"
+
+    /** Latest measured heart rate in bpm; 0 means no measurement yet. */
+    fun saveLatestHr(context: Context, bpm: Float) {
+        saveLatestHr(context, bpm, System.currentTimeMillis())
+    }
+
+    /** Latest measured heart rate plus when it was taken (v2.3, K). */
+    fun saveLatestHr(context: Context, bpm: Float, timestamp: Long) {
+        prefs(context).edit()
+            .putFloat(KEY_LATEST_HR, bpm)
+            .putLong(KEY_LATEST_HR_TS, timestamp)
+            .apply()
+    }
+
+    fun loadLatestHr(context: Context): Float =
+        prefs(context).getFloat(KEY_LATEST_HR, 0f)
+
+    /** Timestamp of the latest HR measurement; 0 when none yet. */
+    fun loadLatestHrTs(context: Context): Long =
+        prefs(context).getLong(KEY_LATEST_HR_TS, 0L)
+
+    /** Latest stress estimate (0-100); -1 when unknown. */
+    fun saveLatestStress(context: Context, score: Int) {
+        prefs(context).edit().putInt(KEY_LATEST_STRESS, score).apply()
+    }
+
+    fun loadLatestStress(context: Context): Int =
+        prefs(context).getInt(KEY_LATEST_STRESS, -1)
+
+    // ------------------------------------------------------------------
+    // Off-body (off-wrist) detection streak (v2.3).
+    // ------------------------------------------------------------------
+
+    private const val KEY_OFFBODY_STREAK = "offbody_empty_streak"
+
+    /** Consecutive sampling attempts with no valid HR signal. */
+    fun getOffBodyStreak(context: Context): Int =
+        prefs(context).getInt(KEY_OFFBODY_STREAK, 0)
+
+    fun setOffBodyStreak(context: Context, streak: Int) {
+        prefs(context).edit().putInt(KEY_OFFBODY_STREAK, streak).apply()
+    }
+
+    // ------------------------------------------------------------------
     // Monitoring & alerts config (pushed from the phone, v1.13+).
     // ------------------------------------------------------------------
 

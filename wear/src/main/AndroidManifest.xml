@@ -9,6 +9,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Exact alarms (v2.3): chained setExactAndAllowWhileIdle drives the
+         BP-check and recording schedules reliably under Doze. Granted by
+         default on API 33+; revocable in Settings → Alarms & reminders —
+         the schedulers fall back to inexact when it's missing. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
     <!-- Monitoring & alerts (v1.13): alert notifications, alert vibration,
          and the continuous heart-rate foreground service. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -100,5 +106,49 @@
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
+
+        <!-- Watch-face complications (v2.3): latest BP, heart rate, stress.
+             Each is SHORT_TEXT only, refreshed when new data lands. -->
+        <service
+            android:name="com.fourgeailabs.bpwatch.wear.BpComplicationService"
+            android:label="@string/complication_bp_label"
+            android:icon="@mipmap/ic_launcher"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.watchface.complications.datasource.action.COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.watchface.complications.datasource.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT" />
+        </service>
+
+        <service
+            android:name="com.fourgeailabs.bpwatch.wear.HrComplicationService"
+            android:label="@string/complication_hr_label"
+            android:icon="@mipmap/ic_launcher"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.watchface.complications.datasource.action.COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.watchface.complications.datasource.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT" />
+        </service>
+
+        <service
+            android:name="com.fourgeailabs.bpwatch.wear.StressComplicationService"
+            android:label="@string/complication_stress_label"
+            android:icon="@mipmap/ic_launcher"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.watchface.complications.datasource.action.COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.watchface.complications.datasource.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT" />
+        </service>
     </application>
 </manifest>

@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.fourgeailabs.bpwatch.R
@@ -48,6 +49,13 @@ class HrMonitorService : Service() {
     /** Last time a live HR tick was sent to the phone (throttled). */
     private var lastLiveSendMs = 0L
 
+    // Off-body pause (v2.3): while the watch is off-wrist, live ticks,
+    // alerts and uploads are paused — no phantom data. Resumed on the
+    // first valid signal or an on-body sensor event.
+    private var offBodyPaused = false
+    private var lastValidSampleMs = 0L
+    private var offBodySensor: OffBodySensor? = null
+
     override fun onCreate() {
         super.onCreate()
         ensureChannel()
@@ -74,6 +82,11 @@ class HrMonitorService : Service() {
     override fun onDestroy() {
         monitor?.stop()
         monitor = null
+        try {
+            offBodySensor?.stop()
+        } catch (_: Exception) {
+        }
+        offBodySensor = null
         sensorThread?.quitSafely()
         sensorThread = null
         uploadHandler?.removeCallbacksAndMessages(null)
@@ -113,6 +126,17 @@ class HrMonitorService : Service() {
         mon.onSample = { hr ->
             if (hr in 25f..250f) {
                 val now = System.currentTimeMillis()
+                lastValidSampleMs = now
+                if (offBodyPaused) {
+                    // First valid signal while paused — back on wrist.
+                    Log.i(TAG, "Valid HR signal while paused — resuming")
+                    offBodyPaused = false
+                    try {
+                        WatchState.onOffBody(false)
+                    } catch (_: Exception) {
+                    }
+                    OffBodyDetector.noteValidSignal(applicationContext)
+                }
                 synchronized(window) {
                     window.addLast(now to hr)
                     while (window.isNotEmpty() && now - window.first().first > UPLOAD_INTERVAL_MS) {
@@ -140,6 +164,35 @@ class HrMonitorService : Service() {
         }
         mon.start(Handler(thread.looper))
         monitor = mon
+        // Hardware off-body sensor (when present): authoritative pause /
+        // resume around the continuous stream.
+        val obs = OffBodySensor(this)
+        if (obs.present) {
+            obs.onState = { onBody ->
+                if (!onBody) {
+                    if (!offBodyPaused) {
+                        Log.i(TAG, "Off-body sensor: watch off-wrist — pausing")
+                        offBodyPaused = true
+                        try {
+                            WatchState.onOffBody(true)
+                        } catch (_: Exception) {
+                        }
+                    }
+                } else {
+                    if (offBodyPaused) {
+                        Log.i(TAG, "Off-body sensor: watch on-wrist — resuming")
+                        offBodyPaused = false
+                        try {
+                            WatchState.onOffBody(false)
+                        } catch (_: Exception) {
+                        }
+                        OffBodyDetector.noteValidSignal(applicationContext)
+                    }
+                }
+            }
+            obs.start(Handler(thread.looper))
+            offBodySensor = obs
+        }
 
         val handler = Handler(thread.looper)
         uploadHandler = handler
@@ -152,6 +205,21 @@ class HrMonitorService : Service() {
     }
 
     private fun uploadWindowAverage() {
+        // Staleness heuristic (v2.3): no valid signal for a while while
+        // continuous monitoring is on ⇒ treat as off-wrist and pause live
+        // ticks/alerts until a valid signal resumes. The hardware sensor
+        // (when present) already covers this via its state callback.
+        val now = System.currentTimeMillis()
+        if (!offBodyPaused && lastValidSampleMs > 0 &&
+            now - lastValidSampleMs > OFF_WRIST_STALE_MS
+        ) {
+            Log.i(TAG, "No valid HR signal for 5+ min — pausing (off-wrist)")
+            offBodyPaused = true
+            try {
+                WatchState.onOffBody(true)
+            } catch (_: Exception) {
+            }
+        }
         val samples: List<Float> = synchronized(window) { window.map { it.second } }
         if (samples.isEmpty()) return
         val avg = samples.average().toFloat()
@@ -200,6 +268,7 @@ class HrMonitorService : Service() {
     }
 
     companion object {
+        private const val TAG = "HrMonitorService"
         private const val ACTION_START = "com.fourgeailabs.bpwatch.wear.action.MONITOR_START"
         private const val ACTION_STOP = "com.fourgeailabs.bpwatch.wear.action.MONITOR_STOP"
         private const val NOTIFICATION_ID = 2001
@@ -207,6 +276,12 @@ class HrMonitorService : Service() {
 
         /** How often the continuous stream uploads an averaged reading. */
         private const val UPLOAD_INTERVAL_MS = 15 * 60_000L
+
+        /**
+         * No valid HR signal for this long ⇒ treat as off-wrist (v2.3).
+         * Evaluated on each 15-minute upload tick.
+         */
+        private const val OFF_WRIST_STALE_MS = 5 * 60_000L
 
         /** How often a live HR tick is sent to the phone for mirroring. */
         private const val LIVE_TICK_MS = 10_000L

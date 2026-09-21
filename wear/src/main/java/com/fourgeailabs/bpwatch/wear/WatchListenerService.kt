@@ -1,6 +1,8 @@
 package com.fourgeailabs.bpwatch.wear
 
+import android.content.pm.PackageManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.fourgeailabs.bpwatch.Link
 import com.google.android.gms.wearable.Asset
 import com.google.android.gms.wearable.DataEvent
@@ -98,6 +100,15 @@ class WatchListenerService : WearableListenerService() {
                 } catch (_: Exception) {
                     // Alerting must never break estimate handling.
                 }
+                // The BP complication shows this estimate — nudge it to
+                // refresh (battery-friendly: only when new data lands).
+                try {
+                    ComplicationUpdater.requestUpdate(this)
+                } catch (_: Exception) {
+                }
+            }
+            Link.PATH_BP_REQUEST -> {
+                scope.launch { handleBpRequest(event) }
             }
             Link.PATH_CALIBRATION -> {
                 val map = DataMap.fromByteArray(event.data)
@@ -313,6 +324,126 @@ class WatchListenerService : WearableListenerService() {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Bad HISTORY_PUSH_ACK payload", e)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Phone-triggered BP check (v2.3).
+    // ------------------------------------------------------------------
+
+    /**
+     * The phone asked for a BP check. Measure headless with the generic HR
+     * sensor (the same 30 s run the hourly check uses), then send the
+     * reading through the normal pipeline: the phone computes/stores the
+     * estimate and sends PATH_BP_ESTIMATE back. Outcomes are reported on
+     * PATH_BP_RESULT so the phone can show status. Never throws.
+     */
+    private suspend fun handleBpRequest(event: MessageEvent) {
+        suspend fun reply(result: String, message: String) {
+            try {
+                val payload = DataMap().apply {
+                    putString(Link.KEY_BP_RESULT, result)
+                    putString(Link.KEY_BP_MESSAGE, message)
+                }.toByteArray()
+                Wearable.getMessageClient(this@WatchListenerService)
+                    .sendMessage(event.sourceNodeId, Link.PATH_BP_RESULT, payload)
+                    .await()
+            } catch (_: Exception) {
+            }
+        }
+        try {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.BODY_SENSORS,
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                reply("failed", "Body sensors permission isn't granted on the watch.")
+                return
+            }
+            val monitor = HeartRateMonitor(this)
+            if (!monitor.available) {
+                reply("failed", "No heart-rate sensor found on this watch.")
+                return
+            }
+            reply("started", "Measuring…")
+            val result = try {
+                HrMeasurement.measure(this)
+            } catch (_: Exception) {
+                null
+            }
+            if (result == null || result.offBody) {
+                // Off-wrist: don't record anything, don't alert — and say so.
+                val streak = OffBodyDetector.noteEmptyAttempt(this)
+                Log.i(
+                    TAG,
+                    "Phone-triggered BP check skipped — watch appears off-wrist " +
+                        "(empty attempt $streak of " +
+                        "${OffBodyDetector.EMPTY_ATTEMPTS_THRESHOLD})",
+                )
+                if (result?.offBody == true) {
+                    reply(
+                        "failed",
+                        "The watch looks like it's off your wrist — put it on and try again.",
+                    )
+                } else {
+                    reply(
+                        "failed",
+                        "Couldn't get a steady reading. Stay still and keep the watch snug, then try again.",
+                    )
+                }
+                return
+            }
+            OffBodyDetector.noteValidSignal(this)
+            // Heart-rate alerting, same as a manual measurement.
+            try {
+                AlertManager.checkHeartRate(this, result.averageHr)
+            } catch (_: Exception) {
+            }
+            val stress = try {
+                StressEstimator.estimate(
+                    result.samples,
+                    WatchSettings.getRestingHr(this),
+                )
+            } catch (_: Exception) {
+                -1
+            }
+            // Persist for the watch-face complications and the home screen
+            // ((K) latest HR on launch).
+            try {
+                val measuredAt = System.currentTimeMillis()
+                WatchSettings.saveLatestHr(this, result.averageHr, measuredAt)
+                WatchSettings.saveLatestStress(this, stress)
+                WatchState.onLatestHr(result.averageHr, measuredAt)
+            } catch (_: Exception) {
+            }
+            // Normal pipeline: the phone computes the estimate and sends
+            // PATH_BP_ESTIMATE back (no new phone path needed).
+            DataLayer.sendHrReading(
+                this,
+                result.averageHr,
+                System.currentTimeMillis(),
+                stress,
+            )
+            // Nudge complications to refresh with the new readings.
+            try {
+                ComplicationUpdater.requestUpdate(this)
+            } catch (_: Exception) {
+            }
+        } catch (_: Exception) {
+            // Last-ditch failure report — the listener must never throw.
+            try {
+                val payload = DataMap().apply {
+                    putString(Link.KEY_BP_RESULT, "failed")
+                    putString(
+                        Link.KEY_BP_MESSAGE,
+                        "The watch check hit an unexpected error.",
+                    )
+                }.toByteArray()
+                Wearable.getMessageClient(this@WatchListenerService)
+                    .sendMessage(event.sourceNodeId, Link.PATH_BP_RESULT, payload)
+                    .await()
+            } catch (_: Exception) {
+            }
         }
     }
 }

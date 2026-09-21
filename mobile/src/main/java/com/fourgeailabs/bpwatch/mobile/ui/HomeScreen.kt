@@ -1,6 +1,7 @@
 package com.fourgeailabs.bpwatch.mobile.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,7 +22,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.ChevronRight
@@ -34,12 +34,14 @@ import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Scale
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -77,6 +79,7 @@ import com.fourgeailabs.bpwatch.mobile.TimelineDay
 import com.fourgeailabs.bpwatch.mobile.TimelineEntry
 import com.fourgeailabs.bpwatch.mobile.TimelineKind
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
+import com.fourgeailabs.bpwatch.mobile.wearable.BpCheckState
 import com.fourgeailabs.bpwatch.mobile.wearable.WatchLiveState
 import java.time.Instant
 import java.time.ZoneId
@@ -99,6 +102,7 @@ fun HomeScreen(
     onOpenWatch: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenTrends: (TrendMetric) -> Unit,
+    onOpenSnore: () -> Unit,
 ) {
     val readings by viewModel.readings.collectAsState()
     val dashboard by viewModel.dashboard.collectAsState()
@@ -111,6 +115,8 @@ fun HomeScreen(
     val sys = latest?.sysEstimate ?: latest?.sysCuff
     val dia = latest?.diaEstimate ?: latest?.diaCuff
     val estimated = latest?.sysEstimate != null
+    // v2.3 phone-triggered BP check state.
+    val bpStatus by BpCheckState.status.collectAsState()
 
     Column(
         modifier = Modifier
@@ -167,6 +173,39 @@ fun HomeScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.White.copy(alpha = 0.7f),
                     )
+                    // v2.3 phone-triggered BP check: asks the watch to sample
+                    // now, over the Data Layer.
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.requestBpCheck() },
+                        // Retry stays available after a failure or when no
+                        // watch is connected; only a live check disables it.
+                        enabled = bpStatus !is BpCheckState.Status.Measuring,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.8f)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color.White,
+                            disabledContentColor = Color.White.copy(alpha = 0.6f),
+                        ),
+                    ) {
+                        Text(
+                            if (bpStatus is BpCheckState.Status.Measuring) "Measuring…"
+                            else "Check now"
+                        )
+                    }
+                    val bpErrorText = when (bpStatus) {
+                        is BpCheckState.Status.Failed ->
+                            (bpStatus as BpCheckState.Status.Failed).message
+                        is BpCheckState.Status.NoWatch -> "No watch connected."
+                        else -> null
+                    }
+                    if (bpErrorText != null) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            bpErrorText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.7f),
+                        )
+                    }
                 }
             }
         }
@@ -222,6 +261,43 @@ fun HomeScreen(
 
         // --- Metric grid: real data only, nothing invented.
         MetricGrid(dashboard = dashboard, onOpenTrends = onOpenTrends)
+
+        // --- Snoring card (v2.3): last night's 22:00–07:00 snore count.
+        // "No data" when none; tap opens the Snore detail screen.
+        val snoreCount = viewModel.lastNightSnoreCount
+        ElevatedCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenSnore),
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TintedIcon(icon = Icons.Filled.Bedtime, contentDescription = null)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp),
+                ) {
+                    Text("Snoring", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        text = when {
+                            snoreCount == null -> "No data"
+                            snoreCount > 0 -> "$snoreCount last night"
+                            else -> "No data"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    Icons.Filled.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
 
         // --- Slim calibrate entry.
         ElevatedCard(
@@ -335,8 +411,8 @@ private fun MetricGrid(
         val m = ((it - h) * 60).toInt()
         if (h > 0) "${h}h ${m}m" else "${m}m"
     }
-    val hydrationText = dashboard.hydrationMl?.let { "${it.toInt()} ml" }
-    val spo2Text = dashboard.spo2?.let { "$it%" }
+    // v2.3 stress tile: 0-100 scale, explicit in the label, never a %.
+    val stressText = dashboard.stress?.let { "$it" }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -363,14 +439,9 @@ private fun MetricGrid(
                 onOpenTrends(TrendMetric.SLEEP)
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            HealthTile(Icons.Filled.WaterDrop, "Hydration", hydrationText, Color(0xFF039BE5)) {
-                onOpenTrends(TrendMetric.HYDRATION)
-            }
-            HealthTile(Icons.Filled.Air, "Blood oxygen", spo2Text, Color(0xFF0B8043)) {
-                onOpenTrends(TrendMetric.SPO2)
-            }
-        }
+        // v2.3: hydration and discontinued tiles removed from the grid (the
+        // hydration Health Connect read and Trends metric stay). Stress takes
+        // the final slot, deep-linking into its Trends graph.
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             HealthTile(
                 Icons.Filled.Scale,
@@ -382,7 +453,14 @@ private fun MetricGrid(
             ) {
                 onOpenTrends(TrendMetric.BMI)
             }
-            Spacer(Modifier.weight(1f))
+            HealthTile(
+                Icons.Filled.Psychology,
+                "Stress · 0–100",
+                stressText,
+                Color(0xFF7B1FA2),
+            ) {
+                onOpenTrends(TrendMetric.STRESS)
+            }
         }
     }
 }

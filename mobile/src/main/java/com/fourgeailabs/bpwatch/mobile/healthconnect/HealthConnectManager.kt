@@ -23,7 +23,6 @@ import androidx.health.connect.client.records.HydrationRecord
 import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.MealType
 import androidx.health.connect.client.records.NutritionRecord
-import androidx.health.connect.client.records.OxygenSaturationRecord
 import androidx.health.connect.client.records.RespiratoryRateRecord
 import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SleepSessionRecord
@@ -35,7 +34,6 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import androidx.health.connect.client.units.Energy
 import androidx.health.connect.client.units.Mass
-import androidx.health.connect.client.units.Percentage
 import androidx.health.connect.client.units.Pressure
 import androidx.health.connect.client.units.Volume
 import java.time.Duration
@@ -43,6 +41,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -50,8 +49,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  *
  * Samsung's own Health SDK needs Samsung's partner approval per app, which we
  * don't have. The supported route: Samsung Health (on the phone) can sync its
- * data — including SpO2 from the Galaxy Watch — into Health Connect, and this
- * class reads it from there. So "connect Samsung Health" really means:
+ * watch data into Health Connect, and this class reads it from there. So
+ * "connect Samsung Health" really means:
  *   1. In Samsung Health: Settings → Health Connect → allow sharing.
  *   2. In BPWatch: grant Health Connect permissions below.
  * It also publishes our BP estimates as BloodPressureRecords so other health
@@ -88,7 +87,6 @@ class HealthConnectManager(private val context: Context) {
     }
 
     val permissions: Set<String> = setOf(
-        HealthPermission.getReadPermission(OxygenSaturationRecord::class),
         HealthPermission.getReadPermission(BloodPressureRecord::class),
         HealthPermission.getWritePermission(BloodPressureRecord::class),
         // Dashboard tiles (v2.0).
@@ -122,7 +120,6 @@ class HealthConnectManager(private val context: Context) {
      * system but this one shows the dialog, the WRITE permission is the poison.
      */
     val readPermissions: Set<String> = setOf(
-        HealthPermission.getReadPermission(OxygenSaturationRecord::class),
         HealthPermission.getReadPermission(BloodPressureRecord::class),
     )
 
@@ -132,7 +129,6 @@ class HealthConnectManager(private val context: Context) {
      * so a denied write grant never blanks the dashboard.
      */
     val dashboardReadPermissions: Set<String> = setOf(
-        HealthPermission.getReadPermission(OxygenSaturationRecord::class),
         HealthPermission.getReadPermission(StepsRecord::class),
         HealthPermission.getReadPermission(DistanceRecord::class),
         HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
@@ -148,9 +144,9 @@ class HealthConnectManager(private val context: Context) {
         client.permissionController.getGrantedPermissions().containsAll(permissions)
 
     /**
-     * Read-permissions only. SpO2 reads must never depend on the unrelated
+     * Read-permissions only: the BP read must never depend on the unrelated
      * blood-pressure WRITE grant — a user who denies writing BP would
-     * otherwise silently lose SpO2 reads too.
+     * otherwise silently lose the BP read too.
      */
     suspend fun hasReadPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().containsAll(readPermissions)
@@ -160,6 +156,13 @@ class HealthConnectManager(private val context: Context) {
         try {
             client.permissionController.getGrantedPermissions()
                 .containsAll(dashboardReadPermissions)
+        } catch (e: CancellationException) {
+            // (J) Never swallow coroutine cancellation: this feeds
+            // MainViewModel.isHcTrendsAvailable, which the TrendsScreen load
+            // effect calls on every metric/range switch. A cancelled check
+            // must die instead of returning a stale false that the dead
+            // effect would assign over the fresh load's UI state.
+            throw e
         } catch (_: Exception) {
             false
         }
@@ -185,56 +188,6 @@ class HealthConnectManager(private val context: Context) {
         emptySet()
     }
 
-    /**
-     * Latest SpO2 % from the last 7 days, or null. Wrapped in a timeout:
-     * Health Connect queries against Samsung Health can hang indefinitely.
-     */
-    suspend fun readLatestSpo2(): Int? = withTimeoutOrNull(SPO2_QUERY_TIMEOUT_MS) {
-        spo2RecordsLast7Days()
-            .maxByOrNull { it.time }
-            ?.percentage
-            ?.let { pct: Percentage -> pct.value.toInt() }
-    }
-
-    /** Count + newest timestamp of SpO2 records in the last 7 days, for diagnostics. */
-    suspend fun readSpo2Stats(): Spo2Stats? = withTimeoutOrNull(SPO2_QUERY_TIMEOUT_MS) {
-        val records = spo2RecordsLast7Days()
-        Spo2Stats(count = records.size, newest = records.maxByOrNull { it.time }?.time)
-    }
-
-    /**
-     * SpO2 samples in [start, end], for the Trends chart. Follows the same
-     * read path as [readLatestSpo2]; null on any failure (callers show the
-     * connect prompt instead of a dead chart).
-     */
-    suspend fun readSpo2Range(start: Instant, end: Instant): List<Spo2Sample>? =
-        withTimeoutOrNull(SPO2_QUERY_TIMEOUT_MS) {
-            client.readRecords(
-                ReadRecordsRequest(
-                    recordType = OxygenSaturationRecord::class,
-                    timeRangeFilter = TimeRangeFilter.between(start, end),
-                ),
-            ).records.mapNotNull { record ->
-                record.percentage?.let { pct ->
-                    Spo2Sample(
-                        timestamp = record.time.toEpochMilli(),
-                        spo2 = pct.value.toInt(),
-                    )
-                }
-            }
-        }
-
-    private suspend fun spo2RecordsLast7Days(): List<OxygenSaturationRecord> {
-        val end = Instant.now()
-        val start = end.minus(7, ChronoUnit.DAYS)
-        return client.readRecords(
-            ReadRecordsRequest(
-                recordType = OxygenSaturationRecord::class,
-                timeRangeFilter = TimeRangeFilter.between(start, end),
-            ),
-        ).records
-    }
-
     /** Publishes an estimated BP reading so Health Connect apps can use it. */
     suspend fun writeBloodPressure(sys: Int, dia: Int, time: Instant) {
         val record = BloodPressureRecord(
@@ -253,7 +206,7 @@ class HealthConnectManager(private val context: Context) {
      * failure. Aggregates are cheap single calls; the record reads are
      * bounded to sensible windows. Never throws (callers wrap in timeout).
      */
-    suspend fun readTodayMetrics(): TodayMetrics? = withTimeoutOrNull(SPO2_QUERY_TIMEOUT_MS) {
+    suspend fun readTodayMetrics(): TodayMetrics? = withTimeoutOrNull(HC_QUERY_TIMEOUT_MS) {
         val zone = ZoneId.systemDefault()
         val startOfDay = LocalDate.now(zone).atStartOfDay(zone).toInstant()
         val now = Instant.now()
@@ -292,16 +245,26 @@ class HealthConnectManager(private val context: Context) {
             .maxByOrNull { it.time }
             ?.weight?.let { HcUnitReaders.kilograms(it) }
 
-        // Last night's sleep: sessions ending in the last 36 hours.
+        // Last night's sleep: sessions ending in the last 36 hours, grouped by
+        // wake date (each record's own endZoneOffset, so night attribution
+        // stays stable after travel/timezone changes). The newest wake-date
+        // group is "last night" — without grouping, the 36 h window could
+        // merge a nap or an early night into the total.
+        // v2.3 sleep audit: counts actual sleep (stages), not time in bed.
         val sleepCutoff = now.minus(36, ChronoUnit.HOURS)
-        val sleepMinutes = client.readRecords(
+        val sleepSessions = client.readRecords(
             ReadRecordsRequest(
                 recordType = SleepSessionRecord::class,
                 timeRangeFilter = TimeRangeFilter.between(sleepCutoff, now),
             )
         ).records
             .filter { it.endTime.isAfter(sleepCutoff) }
-            .sumOf { Duration.between(it.startTime, it.endTime).toMinutes() }
+        val lastNightSleepMinutes = sleepSessions
+            .groupBy { wakeDate(it) }
+            .maxByOrNull { (date, _) -> date }
+            ?.value
+            ?.sumOf { sleepMinutes(it) }
+            ?: 0L
 
         TodayMetrics(
             steps = agg.get(StepsRecord.COUNT_TOTAL),
@@ -309,7 +272,7 @@ class HealthConnectManager(private val context: Context) {
             caloriesKcal = agg.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.let { HcUnitReaders.kilocalories(it) },
             heartRateBpm = heartRateBpm,
             weightKg = weightKg,
-            sleepHours = (sleepMinutes / 60.0).takeIf { sleepMinutes > 0 },
+            sleepHours = (lastNightSleepMinutes / 60.0).takeIf { lastNightSleepMinutes > 0 },
             hydrationLiters = agg.get(HydrationRecord.VOLUME_TOTAL)?.let { HcUnitReaders.liters(it) },
         )
     }
@@ -317,8 +280,9 @@ class HealthConnectManager(private val context: Context) {
     /**
      * Bucketed history for a Trends metric over [start, end], or null on any
      * failure. Steps, distance, calories and hydration are sums per bucket;
-     * weight is the latest reading per bucket; sleep is total hours per
-     * bucket (each session attributed to the bucket its end falls in).
+     * weight is the latest reading per bucket; sleep is actual sleep hours
+     * per bucket (each session attributed to the local day its end falls
+     * in).
      * Empty buckets are dropped, so sparse metrics show sparse points.
      * Callers pass 1-hour buckets for the Hour/Day ranges, 24-hour buckets
      * for Week/Month/Year. Never throws (callers wrap in a timeout).
@@ -378,10 +342,24 @@ class HealthConnectManager(private val context: Context) {
                         timeRangeFilter = filter,
                     )
                 ).records
-                records.groupBy { bucketStart(it.endTime, start, slicer) }
+                // v2.3 sleep audit: each session counts toward the local
+                // calendar day its end falls on (the morning you woke up).
+                // Range-aligned 24h buckets could split one morning's
+                // sessions across two days and mislabel the x-axis, so daily
+                // buckets are midnight-aligned instead. Hourly buckets keep
+                // the range-aligned slicer.
+                val zone = ZoneId.systemDefault()
+                records.groupBy { session ->
+                    if (bucketHours >= 24) {
+                        // Attribute by wake date using the record's own
+                        // end-zone offset (stable across timezone changes).
+                        wakeDate(session).atStartOfDay(zone).toInstant()
+                    } else {
+                        bucketStart(session.endTime, start, slicer)
+                    }
+                }
                     .map { (bucket, rs) ->
-                        val hours =
-                            rs.sumOf { Duration.between(it.startTime, it.endTime).toMinutes() } / 60f
+                        val hours = rs.sumOf { sleepMinutes(it) } / 60f
                         HcTrendPoint(bucket.toEpochMilli(), hours)
                     }
                     .sortedBy { it.timestamp }
@@ -469,6 +447,35 @@ class HealthConnectManager(private val context: Context) {
         return rangeStart.plus(slicer.multipliedBy(idx))
     }
 
+    /**
+     * Minutes of actual sleep in a session (v2.3 sleep audit). When the
+     * source wrote stages (Samsung Health does), only the sleeping stages
+     * count — awake, awake-in-bed and out-of-bed time is time in bed, not
+     * sleep. STAGE_TYPE_UNKNOWN counts as sleep, matching the platform's
+     * aggregate semantics: unknown means "asleep, unclassified", not awake.
+     * When no stages were recorded at all, falls back to the full session
+     * span so stageless sources still contribute.
+     */
+    /**
+     * The local calendar date a sleep session ends on (the "wake date"),
+     * using the record's own end-zone offset so historical night attribution
+     * doesn't shift when the phone's timezone changes (e.g. after travel).
+     */
+    private fun wakeDate(session: SleepSessionRecord): LocalDate =
+        session.endTime.atZone(session.endZoneOffset ?: ZoneId.systemDefault()).toLocalDate()
+
+    private fun sleepMinutes(session: SleepSessionRecord): Long {
+        val stages = session.stages
+        if (stages.isEmpty()) {
+            return Duration.between(session.startTime, session.endTime).toMinutes()
+                .coerceAtLeast(0L)
+        }
+        return stages
+            .filter { it.stage in SLEEP_STAGE_TYPES }
+            .sumOf { Duration.between(it.startTime, it.endTime).toMinutes() }
+            .coerceAtLeast(0L)
+    }
+
     /** Logs a weight entry to Health Connect. Throws on failure. */
     suspend fun writeWeight(weightKg: Double, time: Instant) {
         client.insertRecords(
@@ -530,8 +537,17 @@ class HealthConnectManager(private val context: Context) {
         private const val SAMSUNG_HEALTH_PKG = "com.sec.android.app.shealth"
         private const val HC_PLAY_STORE_PKG = "com.google.android.apps.healthdata"
 
-        /** SpO2 queries against Samsung Health can hang — never wait forever. */
-        private const val SPO2_QUERY_TIMEOUT_MS = 15_000L
+        /** Health Connect queries can hang — never wait forever. */
+        private const val HC_QUERY_TIMEOUT_MS = 15_000L
+
+        /** Stage types that count as asleep (everything else is time in bed). */
+        private val SLEEP_STAGE_TYPES = setOf(
+            SleepSessionRecord.STAGE_TYPE_UNKNOWN,
+            SleepSessionRecord.STAGE_TYPE_SLEEPING,
+            SleepSessionRecord.STAGE_TYPE_LIGHT,
+            SleepSessionRecord.STAGE_TYPE_DEEP,
+            SleepSessionRecord.STAGE_TYPE_REM,
+        )
 
         /** Trend range queries can span a year of buckets — allow longer. */
         private const val HC_TREND_TIMEOUT_MS = 30_000L
@@ -645,12 +661,6 @@ class HealthConnectManager(private val context: Context) {
         }
     }
 }
-
-/** SpO2 diagnostic: how many records Health Connect returned in the last 7 days. */
-data class Spo2Stats(val count: Int, val newest: java.time.Instant?)
-
-/** One SpO2 sample for the Trends chart. */
-data class Spo2Sample(val timestamp: Long, val spo2: Int)
 
 /** Health Connect-backed Trends metrics (v2.1): every home tile's landing spot. */
 enum class HcTrendMetric {

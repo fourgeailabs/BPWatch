@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="complication_bp_label">BPWatch BP</string>
+    <string name="complication_hr_label">BPWatch heart rate</string>
+    <string name="complication_stress_label">BPWatch stress</string>
+</resources>

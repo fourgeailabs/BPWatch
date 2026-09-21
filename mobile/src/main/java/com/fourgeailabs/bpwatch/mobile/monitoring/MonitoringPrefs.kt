@@ -72,6 +72,22 @@ class MonitoringPrefs(context: Context) {
         _recordHr.value = enabled
     }
 
+    // ------------------------------------------------------------------
+    // Snore detection (v2.3, opt-in). Phone microphone, fixed overnight
+    // window 22:00–07:00 local time, foreground service. Default OFF —
+    // recording audio all night costs battery, and the user should opt in.
+    // Kept out of MonitoringConfig for the same reason as recordHr: nothing
+    // syncs it to the watch, and a watch config rebroadcast must never
+    // clobber it.
+    // ------------------------------------------------------------------
+    private val _snoreDetection = MutableStateFlow(prefs.getBoolean(KEY_SNORE_DETECTION, false))
+    val snoreDetection: StateFlow<Boolean> = _snoreDetection.asStateFlow()
+
+    fun setSnoreDetection(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SNORE_DETECTION, enabled).apply()
+        _snoreDetection.value = enabled
+    }
+
     /**
      * True once the user has explicitly saved monitoring settings. The phone
      * only re-sends config to the watch on incoming readings after this —
@@ -147,5 +163,6 @@ class MonitoringPrefs(context: Context) {
         private const val KEY_BP_LOW_ENABLED = "bp_low_enabled"
         private const val KEY_SYS_LOW = "sys_low"
         private const val KEY_DIA_LOW = "dia_low"
+        private const val KEY_SNORE_DETECTION = "snore_detection"
     }
 }

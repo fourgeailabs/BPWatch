@@ -19,6 +19,7 @@ class BpRepository private constructor(context: Context) {
     val dao = AppDatabase.get(appContext).readingDao()
     val logDao = AppDatabase.get(appContext).healthLogDao()
     val sampleDao = AppDatabase.get(appContext).sampleDao()
+    val snoreDao = AppDatabase.get(appContext).snoreDao()
     val calibrationStore = CalibrationStore(appContext)
 
     val readings: Flow<List<Reading>> = dao.observeAll()
@@ -44,16 +45,6 @@ class BpRepository private constructor(context: Context) {
     }
 
     suspend fun clearCalibration() = calibrationStore.clear()
-
-    suspend fun addManualSpo2(spo2: Int) {
-        dao.insert(
-            Reading(
-                timestamp = System.currentTimeMillis(),
-                spo2 = spo2,
-                source = "manual",
-            )
-        )
-    }
 
     suspend fun addHealthLog(log: HealthLog) {
         logDao.insert(log)
