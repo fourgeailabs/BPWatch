@@ -134,6 +134,33 @@ fun AboutScreen() {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        // v2.4.0: moved here from Settings — the disclaimer belongs with About.
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+            ),
+        ) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Important",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Text(
+                    text = "BPWatch is a personal wellness tool, not a medical device. " +
+                        "Blood pressure here is estimated from heart rate using your own " +
+                        "cuff calibration — it is not a measurement. Never use it to " +
+                        "diagnose, treat, or adjust medication. When in doubt, use a cuff.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+        }
     }
 }
 

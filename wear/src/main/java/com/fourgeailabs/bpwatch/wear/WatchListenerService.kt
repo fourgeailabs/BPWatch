@@ -191,6 +191,12 @@ class WatchListenerService : WearableListenerService() {
                 putLong(Link.KEY_APK_VERSION_CODE, installedCode)
                 putString(Link.KEY_APK_VERSION_NAME, installedName)
                 putBoolean(Link.KEY_APK_NEEDS_UPDATE, needsUpdate)
+                // v2.4.0: tell the phone whether "Install unknown apps" is
+                // allowed for BPWatch, so it can warn before beaming 20 MB.
+                putBoolean(
+                    Link.KEY_APK_CAN_INSTALL,
+                    packageManager.canRequestPackageInstalls(),
+                )
             }.toByteArray()
             Wearable.getMessageClient(this)
                 .sendMessage(event.sourceNodeId, Link.PATH_APK_READY, reply)
@@ -259,6 +265,29 @@ class WatchListenerService : WearableListenerService() {
                 }
             }
             Log.i(TAG, "APK verified, installing $offeredName")
+            // v2.4.0: signature pre-check. A self-update signed with a
+            // different key than the installed watch app fails inside
+            // PackageInstaller with a cryptic code — catch it here with a
+            // message that says what to do. Skip only when the phone didn't
+            // send a cert hash (older phone build).
+            val expectedCert = if (map.containsKey(Link.KEY_APK_CERT_SHA256)) {
+                map.getString(Link.KEY_APK_CERT_SHA256)
+            } else {
+                null
+            }
+            if (expectedCert != null) {
+                val ownCert = signingCertSha256(this)
+                if (ownCert != null && !ownCert.equals(expectedCert, ignoreCase = true)) {
+                    Log.w(TAG, "APK signing-cert mismatch: expected $expectedCert, own $ownCert")
+                    return result(
+                        "failed",
+                        "Signature mismatch — the watch is running a build " +
+                            "signed with a different key. Do one final " +
+                            "install over Wi-Fi debugging, then one-tap " +
+                            "updates will work from there.",
+                    )
+                }
+            }
             val ok = ApkSelfUpdater.installUpdate(this, outFile)
             if (ok) {
                 result("installing", "Confirm the update on your watch.")
@@ -285,6 +314,28 @@ class WatchListenerService : WearableListenerService() {
                 }
             }
             return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        /**
+         * v2.4.0: hex SHA-256 of this app's own signing certificate, so the
+         * update handler can compare it against the incoming APK's cert and
+         * fail fast on a signature mismatch.
+         */
+        private fun signingCertSha256(context: android.content.Context): String? {
+            return try {
+                @Suppress("DEPRECATION")
+                val info = context.packageManager.getPackageInfo(
+                    context.packageName,
+                    android.content.pm.PackageManager.GET_SIGNATURES,
+                )
+                val sigBytes = info.signatures?.firstOrNull()?.toByteArray()
+                    ?: return null
+                java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(sigBytes)
+                    .joinToString("") { "%02x".format(it) }
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 

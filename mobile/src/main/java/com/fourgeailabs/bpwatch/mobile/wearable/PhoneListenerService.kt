@@ -355,6 +355,11 @@ class PhoneListenerService : WearableListenerService() {
             val versionName = map.getString(Link.KEY_APK_VERSION_NAME).orEmpty()
             val needsUpdate = map.getBoolean(Link.KEY_APK_NEEDS_UPDATE)
             WatchUpdateState.onWatchInfo(versionCode, versionName)
+            // v2.4.0: the watch reports whether "Install unknown apps" is
+            // allowed for BPWatch, so the UI can warn before beaming.
+            if (map.containsKey(Link.KEY_APK_CAN_INSTALL)) {
+                WatchUpdateState.onCanInstall(map.getBoolean(Link.KEY_APK_CAN_INSTALL))
+            }
             if (!needsUpdate) {
                 WatchUpdateState.upToDate("$versionName ($versionCode)")
             }

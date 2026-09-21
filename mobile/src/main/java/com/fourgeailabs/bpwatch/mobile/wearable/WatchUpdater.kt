@@ -100,6 +100,11 @@ object WatchUpdater {
                 dataMap.putString(Link.KEY_APK_VERSION_NAME, bundled.versionName)
                 dataMap.putLong(Link.KEY_TIMESTAMP, System.currentTimeMillis())
                 dataMap.putString(Link.KEY_APK_SHA256, sha256)
+                // v2.4.0: signing-certificate hash so the watch can fail fast
+                // on a signature mismatch instead of a cryptic installer error.
+                signingCertSha256(context, bundled.file)?.let { certSha ->
+                    dataMap.putString(Link.KEY_APK_CERT_SHA256, certSha)
+                }
                 dataMap.putAsset(Link.KEY_APK_ASSET, Asset.createFromBytes(bytes))
             }
             Wearable.getDataClient(context)
@@ -124,6 +129,29 @@ object WatchUpdater {
             true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /**
+     * v2.4.0: hex SHA-256 of the first signing certificate of an APK file.
+     * The phone sends this with the update so the watch can compare it
+     * against its own signing certificate and fail fast with a clear
+     * message when the keys don't match, instead of a cryptic
+     * PackageInstaller failure after a 20 MB transfer.
+     */
+    fun signingCertSha256(context: Context, apkFile: File): String? {
+        return try {
+            @Suppress("DEPRECATION")
+            val info = context.packageManager.getPackageArchiveInfo(
+                apkFile.absolutePath,
+                android.content.pm.PackageManager.GET_SIGNATURES,
+            ) ?: return null
+            val sigBytes = info.signatures?.firstOrNull()?.toByteArray() ?: return null
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest(sigBytes)
+                .joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            null
         }
     }
 }

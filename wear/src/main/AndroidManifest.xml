@@ -22,6 +22,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
 
+    <!-- Self-update (v2.4.0): the watch installs its own updates through
+         PackageInstaller. Declaring this makes BPWatch appear in the watch's
+         Settings → Apps → Special app access → Install unknown apps list so
+         the user can allow it — without this the one-tap updater is blocked
+         on devices that gate sideloaded self-updates behind it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:label="BPWatch"
         android:icon="@mipmap/ic_launcher"

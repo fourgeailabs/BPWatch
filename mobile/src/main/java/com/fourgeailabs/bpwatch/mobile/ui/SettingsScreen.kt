@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
@@ -69,190 +70,71 @@ import com.fourgeailabs.bpwatch.mobile.snore.SnoreScheduler
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    viewModel: MainViewModel,
-    onRequestHealthConnectPermissions: (Set<String>) -> Unit,
-    onRequestMicPermission: () -> Unit,
+    onOpenWatch: () -> Unit,
+    onOpenProfile: () -> Unit,
+    onOpenConnections: () -> Unit,
+    onOpenMonitoring: () -> Unit,
+    onOpenSleep: () -> Unit,
+    onOpenCalibration: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenChangelog: () -> Unit,
-    // v2.3.2: raw sleep facts from Health Connect for the sleep diagnostic.
-    onDiagnoseSleep: suspend () -> SleepDiagnosis,
 ) {
-    val model by viewModel.calibrationModel.collectAsState()
-    val points by viewModel.calibrationPoints.collectAsState()
-    val profile by viewModel.userProfile.collectAsState()
-    val monitoring by viewModel.monitoringConfig.collectAsState()
-    val recordHr by viewModel.recordHr.collectAsState()
-    val snoreEnabled by viewModel.snoreEnabled.collectAsState()
-    val snoreStatus by viewModel.snoreStatus.collectAsState()
-    val snoreListening by viewModel.snoreListening.collectAsState()
-
+    // v2.4.0: Settings is a hub — every section is a clickable card that
+    // opens that section's own screen (back button returns here).
+    val sections = listOf(
+        Quad(Icons.Filled.Watch, "Watch app", "Install and update the watch app", onOpenWatch),
+        Quad(Icons.Filled.Person, "Body profile", "Height, weight, age, sex and BMI", onOpenProfile),
+        Quad(Icons.Filled.Favorite, "Connections", "Samsung Health and Health Connect", onOpenConnections),
+        Quad(Icons.Filled.MonitorHeart, "Monitoring & alerts", "Check schedule, thresholds, alerts", onOpenMonitoring),
+        Quad(Icons.Filled.Bedtime, "Sleep", "Snore detection and sleep data", onOpenSleep),
+        Quad(Icons.Filled.Tune, "Calibration", "Cuff readings and model status", onOpenCalibration),
+        Quad(Icons.Filled.Info, "About", "Version, credits and links", onOpenAbout),
+        Quad(Icons.Filled.NewReleases, "What's new", "Release history, newest first", onOpenChangelog),
+    )
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Settings", style = MaterialTheme.typography.headlineMedium)
-
-        SettingsSection(title = "Body profile", icon = Icons.Filled.Person) {
-            ProfileCard(profile = profile, onSave = { viewModel.saveProfile(it) })
-        }
-
-        SettingsSection(title = "Connections", icon = Icons.Filled.Favorite) {
-            SamsungHealthCard(
-                hcAvailable = viewModel.hcAvailable,
-                hcGranted = viewModel.hcGranted,
-                hcStatusText = viewModel.hcStatusText,
-                hcNeedsUpdate = viewModel.hcNeedsUpdate,
-                hcGrantedSet = viewModel.hcGrantedSet,
-                hcPermissions = viewModel.hcPermissions,
-                hcReadPermissions = viewModel.hcReadPermissions,
-                onRequestPermissions = onRequestHealthConnectPermissions,
-            )
-        }
-
-        SettingsSection(title = "Monitoring & alerts", icon = Icons.Filled.MonitorHeart) {
-            MonitoringCard(
-                config = monitoring,
-                onUpdate = { viewModel.updateMonitoring(it) },
-                recordHr = recordHr,
-                onRecordHrChange = { viewModel.setRecordHr(it) },
-            )
-        }
-
-        // v2.3: overnight snore detection on the phone microphone. Opt-in,
-        // default off; the Settings copy says plainly that the mic records
-        // overnight and that it costs battery.
-        SettingsSection(title = "Sleep", icon = Icons.Filled.Bedtime) {
-            SnoreCard(
-                enabled = snoreEnabled,
-                listening = snoreListening,
-                status = snoreStatus,
-                onToggle = { viewModel.onSnoreToggle(it) },
-                onStartNow = { viewModel.startSnoreNow() },
-                onRequestMicPermission = onRequestMicPermission,
-                isMicGranted = { viewModel.isMicGranted() },
-            )
-            // v2.3.2: shows what Health Connect actually holds for sleep —
-            // grant state, raw sessions, writers, errors.
-            SleepDiagnosticsCard(onDiagnose = onDiagnoseSleep)
-        }
-
-        SettingsSection(title = "Calibration", icon = Icons.Filled.Tune) {
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    val m = model
-                    Text(
-                        text = if (m != null)
-                            "Calibrated with ${m.points} points. " +
-                                "Systolic ≈ ${"%.2f".format(m.aSys)}×HR ${"%+.1f".format(m.bSys)}; " +
-                                "diastolic ≈ ${"%.2f".format(m.aDia)}×HR ${"%+.1f".format(m.bDia)}."
-                        else
-                            "Not calibrated yet — ${CalibrationEngine.MIN_POINTS - points.size} more " +
-                                "cuff readings needed.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    if (points.isNotEmpty()) {
-                        OutlinedButton(onClick = { viewModel.clearCalibration() }) {
-                            Text("Clear calibration")
-                        }
-                    }
-                }
-            }
-        }
-
-        SettingsSection(title = "About", icon = Icons.Filled.Info) {
-            ListItem(
-                headlineContent = {
-                    Text("About BPWatch", style = MaterialTheme.typography.titleSmall)
-                },
-                supportingContent = {
-                    Text(
-                        "Version, credits and links",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                leadingContent = {
-                    Icon(
-                        Icons.Filled.Info,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                },
-                trailingContent = {
-                    Icon(
-                        Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenAbout),
-            )
-            ListItem(
-                headlineContent = {
-                    Text("What's new", style = MaterialTheme.typography.titleSmall)
-                },
-                supportingContent = {
-                    Text(
-                        "Release history, newest first",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                leadingContent = {
-                    Icon(
-                        Icons.Filled.NewReleases,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                },
-                trailingContent = {
-                    Icon(
-                        Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenChangelog),
-            )
+        sections.forEach { (icon, title, subtitle, onClick) ->
             ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onClick),
             ) {
-                Column(
-                    Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    Text(
-                        text = "Important",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp),
                     )
-                    Text(
-                        text = "BPWatch is a personal wellness tool, not a medical device. " +
-                            "Blood pressure here is estimated from heart rate using your own " +
-                            "cuff calibration — it is not a measurement. Never use it to " +
-                            "diagnose, treat, or adjust medication. When in doubt, use a cuff.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(title, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         }
-
         Spacer(Modifier.height(8.dp))
         Text(
             "BPWatch ${BuildConfig.VERSION_NAME} — built for Galaxy Watch Ultra + Pixel",
@@ -262,37 +144,17 @@ fun SettingsScreen(
     }
 }
 
-@Composable
-private fun SettingsSection(
-    title: String,
-    icon: ImageVector,
-    content: @Composable () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(horizontal = 4.dp),
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
-            Text(
-                title,
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        content()
-    }
-}
+/** One row of the Settings hub. */
+private data class Quad(
+    val icon: ImageVector,
+    val title: String,
+    val subtitle: String,
+    val onClick: () -> Unit,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProfileCard(profile: UserProfile, onSave: (UserProfile) -> Unit) {
+fun ProfileCard(profile: UserProfile, onSave: (UserProfile) -> Unit) {
     var height by remember(profile) { mutableStateOf(profile.heightCm?.toString() ?: "") }
     var weight by remember(profile) { mutableStateOf(profile.weightKg?.toString() ?: "") }
     var age by remember(profile) { mutableStateOf(profile.age?.toString() ?: "") }
@@ -396,7 +258,7 @@ private fun ProfileCard(profile: UserProfile, onSave: (UserProfile) -> Unit) {
 }
 
 @Composable
-private fun SamsungHealthCard(
+fun SamsungHealthCard(
     hcAvailable: Boolean,
     hcGranted: Boolean,
     hcStatusText: String,
@@ -572,7 +434,7 @@ private fun SamsungHealthCard(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MonitoringCard(
+fun MonitoringCard(
     config: MonitoringConfig,
     onUpdate: ((MonitoringConfig) -> MonitoringConfig) -> Unit,
     recordHr: Boolean,
@@ -735,7 +597,7 @@ private fun MonitoringCard(
 }
 
 @Composable
-private fun MonitoringSubHeader(text: String) {
+fun MonitoringSubHeader(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.titleSmall,
@@ -745,7 +607,7 @@ private fun MonitoringSubHeader(text: String) {
 }
 
 @Composable
-private fun SwitchRow(
+fun SwitchRow(
     headline: String,
     subtitle: String,
     checked: Boolean,
@@ -775,7 +637,7 @@ private fun SwitchRow(
  * taps Done or moves focus away.
  */
 @Composable
-private fun ThresholdField(
+fun ThresholdField(
     label: String,
     unit: String,
     value: Int,
@@ -807,7 +669,7 @@ private fun ThresholdField(
  * and that it costs extra battery, and that clips stay on the phone.
  */
 @Composable
-private fun SnoreCard(
+fun SnoreCard(
     enabled: Boolean,
     listening: Boolean,
     status: String?,

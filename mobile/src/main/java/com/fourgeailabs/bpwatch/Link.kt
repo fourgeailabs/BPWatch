@@ -89,6 +89,21 @@ object Link {
     const val KEY_APK_SHA256 = "apk_sha256"
     const val KEY_APK_RESULT = "apk_result"
     const val KEY_APK_MESSAGE = "apk_message"
+    /**
+     * v2.4.0: hex SHA-256 of the bundled APK's signing certificate, sent by
+     * the phone on PATH_APK_UPDATE. The watch compares it against its own
+     * signing certificate BEFORE installing and fails fast with a clear
+     * message on mismatch, instead of beaming 20 MB and getting a cryptic
+     * PackageInstaller failure.
+     */
+    const val KEY_APK_CERT_SHA256 = "apk_cert_sha256"
+    /**
+     * v2.4.0: watch → phone on PATH_APK_READY. True when the watch reports
+     * PackageManager.canRequestPackageInstalls() — i.e. "Install unknown
+     * apps" is allowed for BPWatch in the watch's Settings → Apps →
+     * Special app access. Absent from older watch builds.
+     */
+    const val KEY_APK_CAN_INSTALL = "apk_can_install"
 
     // ------------------------------------------------------------------
     // Continuous HR + stress recording (v2.0, opt-in). The phone owns the

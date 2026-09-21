@@ -205,7 +205,8 @@ fun WatchInstallScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Watch app", style = MaterialTheme.typography.headlineMedium)
+        // v2.4.0: no headline here — this screen is opened from Settings and
+        // the top bar already says "Watch app".
         Text(
             "Update BPWatch on your Galaxy Watch with one tap — no debugging, " +
                 "no PC or cable. The watch app is bundled inside this phone " +
@@ -507,6 +508,17 @@ private fun WatchUpdaterCard() {
                         "receive one-tap updates.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // v2.4.0: the watch tells us upfront whether "Install unknown
+            // apps" is allowed for BPWatch — warn before beaming 20 MB.
+            if (ui.watchCanInstall == false) {
+                Text(
+                    "Heads up: on your watch, Settings → Apps → Special app " +
+                        "access → Install unknown apps → allow BPWatch. " +
+                        "Without it the watch can't install the update.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
             if (ui.status != WatchUpdateState.Status.IDLE && ui.message.isNotEmpty()) {

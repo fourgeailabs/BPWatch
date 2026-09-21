@@ -20,6 +20,22 @@ data class ChangelogEntry(
 /** Newest first. The full history starts at the first public version. */
 val CHANGELOG: List<ChangelogEntry> = listOf(
     ChangelogEntry(
+        versionName = "2.4.0",
+        versionCode = 29,
+        date = "2026-09-21",
+        notes = listOf(
+            "Settings redesigned: every section is now a clickable card that " +
+                "opens its own screen — the Watch tab moved into Settings → " +
+                "Watch app, and the bottom bar is back to Home, Trends, " +
+                "History, Settings.",
+            "One-tap watch updater: the watch now declares the install " +
+                "permission it needs, the phone warns you upfront if " +
+                "\"Install unknown apps\" isn't allowed for BPWatch on the " +
+                "watch, and a signature mismatch fails fast with a clear " +
+                "message instead of a cryptic installer error.",
+        ),
+    ),
+    ChangelogEntry(
         versionName = "2.3.3",
         versionCode = 28,
         date = "2026-09-21",

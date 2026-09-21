@@ -34,6 +34,14 @@ object WatchUpdateState {
         val bundledVersion: String? = null,
         /** Installed watch version, e.g. "1.14.0 (18)". Null until known. */
         val watchVersion: String? = null,
+        /**
+         * v2.4.0: whether the watch reports PackageManager
+         * .canRequestPackageInstalls() — i.e. "Install unknown apps" is
+         * allowed for BPWatch in the watch's Settings → Apps → Special app
+         * access. Null until the watch answers (older watch builds never
+         * send it). When false the UI warns before beaming the APK.
+         */
+        val watchCanInstall: Boolean? = null,
         /** Bumped every time the watch answers (info or update handshake),
          * so the UI can wait for a *fresh* reply rather than a stale value. */
         val lastReadyAt: Long = 0L,
@@ -51,6 +59,15 @@ object WatchUpdateState {
     fun onWatchInfo(versionCode: Long, versionName: String) {
         _state.value = _state.value.copy(
             watchVersion = "$versionName ($versionCode)",
+            lastReadyAt = System.currentTimeMillis(),
+        )
+    }
+
+    /** v2.4.0: the watch answered the update handshake — record whether it
+     * is allowed to install packages ("Install unknown apps"). */
+    fun onCanInstall(canInstall: Boolean) {
+        _state.value = _state.value.copy(
+            watchCanInstall = canInstall,
             lastReadyAt = System.currentTimeMillis(),
         )
     }

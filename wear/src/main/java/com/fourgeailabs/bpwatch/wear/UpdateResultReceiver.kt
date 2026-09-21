@@ -42,9 +42,18 @@ class UpdateResultReceiver : BroadcastReceiver() {
         }
         val detail = statusText(status, message)
         Log.w(TAG, "Self-update failed: status=$status message=$message")
+        // v2.4.0: when the install is blocked because "Install unknown apps"
+        // isn't allowed for BPWatch, say exactly where to flip the toggle —
+        // this is the most common reason a sideloaded self-update fails.
+        val guidance = if (!context.packageManager.canRequestPackageInstalls()) {
+            " On the watch: Settings → Apps → Special app access → " +
+                "Install unknown apps → allow BPWatch, then try again."
+        } else {
+            ""
+        }
         Toast.makeText(
             context,
-            "Watch update failed: $detail (code $status)",
+            "Watch update failed: $detail (code $status)$guidance",
             Toast.LENGTH_LONG,
         ).show()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
@@ -52,7 +61,7 @@ class UpdateResultReceiver : BroadcastReceiver() {
                 val nodes = Wearable.getNodeClient(context).connectedNodes.await()
                 val payload = DataMap().apply {
                     putString(Link.KEY_APK_RESULT, "failed")
-                    putString(Link.KEY_APK_MESSAGE, "Watch update failed: $detail (code $status)")
+                    putString(Link.KEY_APK_MESSAGE, "Watch update failed: $detail (code $status)$guidance")
                 }.toByteArray()
                 nodes.forEach { node ->
                     Wearable.getMessageClient(context)

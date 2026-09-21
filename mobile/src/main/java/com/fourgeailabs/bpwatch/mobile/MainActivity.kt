@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,12 +51,17 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
 import com.fourgeailabs.bpwatch.mobile.ui.AboutScreen
+import com.fourgeailabs.bpwatch.mobile.ui.BodyProfileSettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.BpWatchTheme
 import com.fourgeailabs.bpwatch.mobile.ui.CalibrateScreen
+import com.fourgeailabs.bpwatch.mobile.ui.CalibrationSettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.ChangelogScreen
+import com.fourgeailabs.bpwatch.mobile.ui.ConnectionsSettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HistoryScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HomeScreen
+import com.fourgeailabs.bpwatch.mobile.ui.MonitoringSettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SettingsScreen
+import com.fourgeailabs.bpwatch.mobile.ui.SleepSettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SnoreScreen
 import com.fourgeailabs.bpwatch.mobile.ui.TrendMetric
 import com.fourgeailabs.bpwatch.mobile.ui.TrendsScreen
@@ -214,8 +218,10 @@ private fun BpWatchPhoneApp(
     onDismissCrashReport: () -> Unit,
 ) {
     val context = LocalContext.current
-    // 0..3 = bottom tabs, 4 = Settings page, 5 = Calibrate page, 6 = Snore
-    // detail page (all opened from Home, not tabs).
+    // v2.4.0: 0..3 = bottom tabs (Home, Trends, History, Settings hub),
+    // 4..12 = detail screens opened from Home or the hub (not tabs):
+    // 4 Calibrate, 5 Snore, 6 About, 7 What's new, 8 Watch app,
+    // 9 Body profile, 10 Connections, 11 Monitoring & alerts, 12 Sleep.
     var selected by remember { mutableIntStateOf(0) }
     // Deep-link target for the Trends tab: a home tile sets this, then the
     // tab switch opens Trends with the metric preselected (Week range is
@@ -315,7 +321,6 @@ private fun BpWatchPhoneApp(
         "Home" to Icons.Filled.Home,
         "Trends" to Icons.Filled.TrendingUp,
         "History" to Icons.Filled.History,
-        "Watch" to Icons.Filled.Watch,
         "Settings" to Icons.Filled.Settings,
     )
 
@@ -328,15 +333,23 @@ private fun BpWatchPhoneApp(
 
     Scaffold(
         topBar = {
-            if (selected == 5 || selected == 6 || selected == 7 || selected == 8) {
+            // v2.4.0: 0..3 = bottom tabs; 4..12 = detail screens with back.
+            // 4 Calibrate, 5 Snoring, 6 About, 7 What's new, 8 Watch app,
+            // 9 Body profile, 10 Connections, 11 Monitoring & alerts, 12 Sleep.
+            if (selected in 4..12) {
                 MediumTopAppBar(
                     title = {
                         Text(
                             when (selected) {
-                                5 -> "Calibrate"
-                                6 -> "Snoring"
-                                7 -> "About"
-                                else -> "What's new"
+                                4 -> "Calibrate"
+                                5 -> "Snoring"
+                                6 -> "About"
+                                7 -> "What's new"
+                                8 -> "Watch app"
+                                9 -> "Body profile"
+                                10 -> "Connections"
+                                11 -> "Monitoring & alerts"
+                                else -> "Sleep"
                             }
                         )
                     },
@@ -344,9 +357,10 @@ private fun BpWatchPhoneApp(
                         // v2.3.2: top-bar back pops the same in-app history as
                         // the system back button, with the old hardcoded
                         // target as a fallback if the stack is ever empty.
+                        // v2.4.0: settings details fall back to the hub (3).
                         IconButton(onClick = {
                             if (!goBack()) selected =
-                                if (selected == 7 || selected == 8) 4 else 0
+                                if (selected in 6..12) 3 else 0
                         }) {
                             Icon(
                                 Icons.Filled.ArrowBack,
@@ -374,11 +388,12 @@ private fun BpWatchPhoneApp(
             when (selected) {
                 0 -> HomeScreen(
                     viewModel,
-                    onOpenCalibrate = { goTo(5) },
-                    onOpenWatch = { goTo(3) },
-                    onOpenSettings = { goTo(4) },
+                    onOpenCalibrate = { goTo(4) },
+                    // v2.4.0: Watch lives in Settings now, not the bottom bar.
+                    onOpenWatch = { goTo(8) },
+                    onOpenSettings = { goTo(3) },
                     onOpenTrends = { metric -> trendsInitial = metric; goTo(1) },
-                    onOpenSnore = { goTo(6) },
+                    onOpenSnore = { goTo(5) },
                 )
                 1 -> TrendsScreen(
                     viewModel,
@@ -389,20 +404,32 @@ private fun BpWatchPhoneApp(
                     onDiagnoseSleep = { viewModel.diagnoseSleep() },
                 )
                 2 -> HistoryScreen(viewModel)
-                3 -> WatchInstallScreen()
-                4 -> SettingsScreen(
+                // v2.4.0: Settings is a hub of clickable cards; each card
+                // opens its own detail screen (8..12).
+                3 -> SettingsScreen(
+                    onOpenWatch = { goTo(8) },
+                    onOpenProfile = { goTo(9) },
+                    onOpenConnections = { goTo(10) },
+                    onOpenMonitoring = { goTo(11) },
+                    onOpenSleep = { goTo(12) },
+                    onOpenCalibration = { goTo(4) },
+                    onOpenAbout = { goTo(6) },
+                    onOpenChangelog = { goTo(7) },
+                )
+                4 -> CalibrateScreen(viewModel)
+                5 -> SnoreScreen(viewModel)
+                6 -> AboutScreen()
+                7 -> ChangelogScreen()
+                8 -> WatchInstallScreen()
+                9 -> BodyProfileSettingsScreen(viewModel)
+                10 -> ConnectionsSettingsScreen(viewModel, onRequestHcPermissions)
+                11 -> MonitoringSettingsScreen(viewModel)
+                12 -> SleepSettingsScreen(
                     viewModel,
-                    onRequestHcPermissions,
                     onRequestMicPermission,
-                    onOpenAbout = { goTo(7) },
-                    onOpenChangelog = { goTo(8) },
                     // v2.3.2: sleep diagnostic card in the Sleep section.
                     onDiagnoseSleep = { viewModel.diagnoseSleep() },
                 )
-                5 -> CalibrateScreen(viewModel)
-                6 -> SnoreScreen(viewModel)
-                7 -> AboutScreen()
-                8 -> ChangelogScreen()
             }
         }
     }
