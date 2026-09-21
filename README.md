@@ -45,11 +45,15 @@ Samsung's own feature, minus their proprietary algorithm:
 - **Home** — latest estimate, heart rate, SpO2, manual logging.
 - **Calibrate** — cuff calibration points (≥3), least-squares fit.
 - **History** — charts and past readings.
-- **Watch** — install/update the watch app over Wi-Fi debugging: enter the
-  watch IP/port, tap Test connection or Install/Update. Handles the
-  pairing-code flow against the watch's TLS wireless-debugging port. A pure
-  Kotlin ADB client (protocol framing, RSA auth, shell, sync push) with unit
-  tests against a fake daemon lives in `mobile/…/adb/`.
+- **Watch** — update the watch app with one tap: the phone beams the bundled
+  watch APK over Bluetooth and the watch installs it itself via
+  PackageInstaller (no debugging, settings preserved). For first-time
+  installs onto a fresh watch, the tab also has the Wi-Fi debugging
+  installer: enter the watch IP/port, tap Test connection or
+  Install/Update. Handles the pairing-code flow against the watch's TLS
+  wireless-debugging port. A pure Kotlin ADB client (protocol framing, RSA
+  auth, shell, sync push) with unit tests against a fake daemon lives in
+  `mobile/…/adb/`.
 - **Settings** — Health Connect connect flow, SDK-status diagnostics,
   body-profile section (height, weight, age, sex, BMI), app version.
 
@@ -108,6 +112,14 @@ Every phone build also rebuilds `:wear` and embeds the fresh watch APK as
 `assets/bpwatch-wear.apk` (see the `bundleWearApk` task), so the Watch tab
 always installs the latest build. Debug builds only; release signing is not
 set up.
+
+**Signing:** both modules sign debug builds with the pinned keystore in
+`keystore/bpwatch-debug.keystore` (a debug key, safe to commit). CI runners
+generate a fresh ephemeral debug key on every run — without the pinned key,
+every build had a different signature, which forced an uninstall (wiping all
+settings) on every update. With one stable key, updates install over the
+top and all data is preserved. If BPWatch ever ships to the Play Store, swap
+in a proper release key kept secret.
 
 **Versioning:** proper semver `MAJOR.MINOR.PATCH` in `versionName`, with
 `versionCode` incremented on every build. Both modules stay in sync; the

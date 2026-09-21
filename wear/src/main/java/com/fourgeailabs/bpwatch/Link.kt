@@ -29,6 +29,62 @@ object Link {
      */
     const val PATH_ALERT = "/bpwatch/alert"
 
+    // ------------------------------------------------------------------
+    // One-tap watch updater (v1.15+): the phone sends the bundled watch APK
+    // over the Data Layer — no Wi-Fi debugging needed. The watch installs
+    // the update itself via PackageInstaller (data is preserved).
+    // ------------------------------------------------------------------
+    /**
+     * Phone → watch: "I have a watch update for you". Payload:
+     * KEY_APK_VERSION_CODE (long) + KEY_APK_VERSION_NAME. The watch replies
+     * on PATH_APK_READY so a 20 MB transfer only starts when needed.
+     */
+    const val PATH_APK_BEGIN = "/bpwatch/apk_begin"
+    /** Watch → phone: reply to PATH_APK_BEGIN. Payload: KEY_APK_VERSION_CODE,
+     * KEY_APK_VERSION_NAME (installed), KEY_APK_NEEDS_UPDATE (boolean). */
+    const val PATH_APK_READY = "/bpwatch/apk_ready"
+    /**
+     * Phone → watch: the APK itself, as a DataItem carrying KEY_APK_ASSET
+     * plus KEY_APK_VERSION_CODE/KEY_APK_VERSION_NAME/KEY_TIMESTAMP (the
+     * timestamp forces the DataItem to count as changed every time).
+     */
+    const val PATH_APK_UPDATE = "/bpwatch/apk_update"
+    /**
+     * Watch → phone: result of handling PATH_APK_UPDATE. Payload:
+     * KEY_APK_RESULT ("installing" | "up_to_date" | "failed") and
+     * KEY_APK_MESSAGE for human-readable detail.
+     */
+    const val PATH_APK_RESULT = "/bpwatch/apk_result"
+    const val KEY_APK_VERSION_CODE = "apk_version_code"
+    const val KEY_APK_VERSION_NAME = "apk_version_name"
+    const val KEY_APK_NEEDS_UPDATE = "apk_needs_update"
+    const val KEY_APK_ASSET = "apk_asset"
+    const val KEY_APK_RESULT = "apk_result"
+    const val KEY_APK_MESSAGE = "apk_message"
+
+    // ------------------------------------------------------------------
+    // Version reporting + settings sync (v1.15+). The phone is the source of
+    // truth for monitoring settings; the watch also pushes its config on
+    // connect so nothing is ever lost (updates, reinstalls, wipes).
+    // ------------------------------------------------------------------
+    /** Watch → phone: installed watch version. Payload: KEY_APK_VERSION_CODE
+     * (long) + KEY_APK_VERSION_NAME. Sent on every peer connect and on
+     * PATH_WATCH_INFO_REQUEST. */
+    const val PATH_WATCH_INFO = "/bpwatch/watch_info"
+    /** Phone → watch: "tell me your version". Empty payload. */
+    const val PATH_WATCH_INFO_REQUEST = "/bpwatch/watch_info_request"
+    /**
+     * Watch → phone: the watch's current monitoring config (same DataMap
+     * format as PATH_MONITORING_CONFIG). The phone adopts it when it has
+     * never been configured itself; otherwise the phone's config wins and
+     * is pushed back.
+     */
+    const val PATH_WATCH_CONFIG = "/bpwatch/watch_config"
+    /** Watch → phone: "send me the full config + calibration state". Empty
+     * payload; the phone replies with PATH_MONITORING_CONFIG and
+     * PATH_CALIBRATION. Sent on watch boot and peer connect. */
+    const val PATH_CONFIG_REQUEST = "/bpwatch/config_request"
+
     const val KEY_ALERT_TYPE = "alert_type"
     const val KEY_SEVERITY = "severity"
     const val KEY_ALERT_TITLE = "alert_title"

@@ -106,4 +106,98 @@ object DataLayer {
             false
         }
     }
+
+    // ------------------------------------------------------------------
+    // Updater + settings sync (v1.15+).
+    // ------------------------------------------------------------------
+
+    /** Current installed version, for the phone's update UI. */
+    fun installedVersion(context: Context): Pair<Long, String> {
+        val pm = context.packageManager
+        val info = pm.getPackageInfo(context.packageName, 0)
+        val code = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        return code to (info.versionName ?: "?")
+    }
+
+    /**
+     * Watch → phone: "here's what I'm running". Sent on every peer connect
+     * and in reply to PATH_WATCH_INFO_REQUEST so the phone always knows
+     * whether an update is available.
+     */
+    suspend fun sendWatchInfo(context: Context): Boolean {
+        val (code, name) = installedVersion(context)
+        val payload = DataMap().apply {
+            putLong(Link.KEY_APK_VERSION_CODE, code)
+            putString(Link.KEY_APK_VERSION_NAME, name)
+        }.toByteArray()
+        return sendToAllNodes(context, Link.PATH_WATCH_INFO, payload)
+    }
+
+    /**
+     * Watch → phone: the watch's current monitoring config, in the same
+     * DataMap format as PATH_MONITORING_CONFIG. The phone adopts it when it
+     * has never been configured itself — so settings survive even a full
+     * phone reinstall with the watch as the bridge.
+     */
+    suspend fun sendWatchConfig(context: Context): Boolean {
+        val config = WatchSettings.getMonitorConfig(context)
+        val payload = DataMap().apply {
+            putInt(Link.KEY_CONFIG_V, 1)
+            putBoolean(Link.KEY_CONTINUOUS_HR, config.continuousHr)
+            putBoolean(Link.KEY_HR_HIGH_ENABLED, config.hrHighEnabled)
+            putInt(Link.KEY_HR_HIGH_THRESHOLD, config.hrHighThreshold)
+            putInt(Link.KEY_BP_INTERVAL_MIN, config.bpIntervalMinutes)
+            putBoolean(Link.KEY_BP_HIGH_ENABLED, config.bpHighEnabled)
+            putInt(Link.KEY_SYS_HIGH, config.sysHigh)
+            putInt(Link.KEY_DIA_HIGH, config.diaHigh)
+            putBoolean(Link.KEY_BP_LOW_ENABLED, config.bpLowEnabled)
+            putInt(Link.KEY_SYS_LOW, config.sysLow)
+            putInt(Link.KEY_DIA_LOW, config.diaLow)
+        }.toByteArray()
+        return sendToAllNodes(context, Link.PATH_WATCH_CONFIG, payload)
+    }
+
+    /**
+     * Watch → phone: "send me the full config + calibration state". Used on
+     * boot and peer connect so a wiped/reinstalled watch re-programs itself
+     * from the phone within seconds — never by hand.
+     */
+    suspend fun requestConfig(context: Context): Boolean =
+        sendToAllNodes(context, Link.PATH_CONFIG_REQUEST, ByteArray(0))
+
+    /**
+     * Fire-and-forget variant for BroadcastReceivers (no coroutine scope).
+     * Best effort — the peer-connect hook covers the cases this misses.
+     */
+    fun announceToPhone(context: Context) {
+        try {
+            val (code, name) = installedVersion(context)
+            val infoPayload = DataMap().apply {
+                putLong(Link.KEY_APK_VERSION_CODE, code)
+                putString(Link.KEY_APK_VERSION_NAME, name)
+            }.toByteArray()
+            val nodeClient = Wearable.getNodeClient(context)
+            val messageClient = Wearable.getMessageClient(context)
+            nodeClient.connectedNodes.addOnSuccessListener { nodes ->
+                nodes.forEach { node ->
+                    messageClient.sendMessage(
+                        node.id,
+                        Link.PATH_WATCH_INFO,
+                        infoPayload,
+                    )
+                    messageClient.sendMessage(
+                        node.id,
+                        Link.PATH_CONFIG_REQUEST,
+                        ByteArray(0),
+                    )
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
 }

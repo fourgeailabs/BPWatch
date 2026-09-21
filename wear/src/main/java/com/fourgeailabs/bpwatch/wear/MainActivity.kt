@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.fourgeailabs.bpwatch.BuildConfig
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.Chip
@@ -332,6 +333,16 @@ private fun BpWatchApp(
                             )
                         }
                         Spacer(Modifier.height(24.dp))
+                    }
+                    item {
+                        // Version stamp: confirms at a glance which build is
+                        // on the wrist (handy after a one-tap update).
+                        Text(
+                            text = "v${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.caption2,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colors.onBackground.copy(alpha = 0.5f),
+                        )
                     }
                 }
 

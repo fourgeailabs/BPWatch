@@ -171,6 +171,10 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             CheckScheduler.ensureScheduled(context)
+            // Re-announce to the phone after a reboot: it re-sends the
+            // monitoring config + calibration state, so a wiped watch
+            // re-programs itself without anyone touching a thing.
+            DataLayer.announceToPhone(context)
         }
     }
 }

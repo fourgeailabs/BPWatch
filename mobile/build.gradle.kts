@@ -18,13 +18,29 @@ android {
         //   MINOR — new features (continues our v1..v11 iteration count)
         //   PATCH — bug fixes on the current MINOR line
         // versionCode must increase by >= 1 every release for Android.
-        versionCode = 18
-        versionName = "1.14.0"
+        versionCode = 19
+        versionName = "1.15.0"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+        }
+    }
+
+    signingConfigs {
+        // Pinned debug keystore (checked into keystore/, same key on every
+        // machine and CI run). CI runners generate a fresh ephemeral debug
+        // key per run, which made every build's signature differ and forced
+        // an uninstall (wiping all settings) on every update. With one
+        // stable key, updates install over the top and data is preserved.
+        // NOTE: this is a *debug* key — a proper release key (kept secret)
+        // must be used if BPWatch ever ships to the Play Store.
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/bpwatch-debug.keystore")
+            storePassword = "android"
+            keyAlias = "bpwatch-debug"
+            keyPassword = "android"
         }
     }
 

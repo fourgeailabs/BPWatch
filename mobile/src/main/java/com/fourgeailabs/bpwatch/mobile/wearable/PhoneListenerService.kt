@@ -5,10 +5,12 @@ import com.fourgeailabs.bpwatch.mobile.BpRepository
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationEngine
 import com.fourgeailabs.bpwatch.mobile.data.Reading
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
+import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringConfig
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringPrefs
 import com.fourgeailabs.bpwatch.mobile.notifications.NotificationHelper
 import com.google.android.gms.wearable.DataMap
 import com.google.android.gms.wearable.MessageEvent
+import com.google.android.gms.wearable.Node
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import kotlinx.coroutines.CoroutineScope
@@ -35,6 +37,78 @@ class PhoneListenerService : WearableListenerService() {
             Link.PATH_HR_READING -> handleHrReading(event)
             Link.PATH_HR_LIVE -> handleHrLive(event)
             Link.PATH_ALERT -> handleAlert(event)
+            Link.PATH_APK_READY -> handleApkReady(event)
+            Link.PATH_APK_RESULT -> handleApkResult(event)
+            Link.PATH_WATCH_INFO -> handleWatchInfo(event)
+            Link.PATH_WATCH_CONFIG -> handleWatchConfig(event)
+            Link.PATH_CONFIG_REQUEST -> handleConfigRequest(event)
+        }
+    }
+
+    /**
+     * A watch (re)connected — maybe after an update, a reboot, or a
+     * reinstall. Push everything it needs to be fully programmed, and ask
+     * it to report its version for the updater UI.
+     */
+    override fun onPeerConnected(node: Node) {
+        scope.launch {
+            try {
+                pushFullSync(node.id)
+            } catch (_: Exception) {
+            }
+            try {
+                WatchUpdater.requestWatchInfo(applicationContext)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * Pushes everything the watch needs to be fully programmed: monitoring
+     * config (only once the user has configured it on the phone — otherwise
+     * the watch keeps its own schedule), calibration state, and the
+     * resting-HR baseline. Called on peer connect, on config request, and
+     * after every heart-rate reading, so a wiped/reinstalled/updated watch
+     * re-programs itself within seconds — never by hand.
+     */
+    private suspend fun pushFullSync(nodeId: String) {
+        val repo = BpRepository.get(applicationContext)
+        val model = try {
+            repo.calibrationModel.first()
+        } catch (_: Exception) {
+            null
+        }
+        // Tell the watch whether it's calibrated, plus the resting-HR
+        // baseline the watch uses for stress estimation (lowest HR
+        // across calibration points).
+        try {
+            val restingHr = repo.calibrationPoints.first()
+                .mapNotNull { it.heartRate }
+                .minOrNull()
+            val calibratedPayload = DataMap().apply {
+                putBoolean(Link.KEY_CALIBRATED, model != null)
+                if (restingHr != null) {
+                    putFloat(Link.KEY_RESTING_HR, restingHr)
+                }
+            }.toByteArray()
+            Wearable.getMessageClient(applicationContext)
+                .sendMessage(nodeId, Link.PATH_CALIBRATION, calibratedPayload)
+                .await()
+        } catch (_: Exception) {
+        }
+
+        // Re-send monitoring settings: only once the user has configured
+        // them — otherwise the watch keeps its existing schedule.
+        try {
+            val monitoringPrefs = MonitoringPrefs(applicationContext)
+            if (monitoringPrefs.isConfigured()) {
+                WatchConfigSender.sendToNode(
+                    applicationContext,
+                    nodeId,
+                    monitoringPrefs.config.value,
+                )
+            }
+        } catch (_: Exception) {
         }
     }
 
@@ -186,42 +260,110 @@ class PhoneListenerService : WearableListenerService() {
                     }
                 }
 
-                // Tell the watch whether it's calibrated, plus the resting-HR
-                // baseline the watch uses for stress estimation (lowest HR
-                // across calibration points).
-                try {
-                    val restingHr = repo.calibrationPoints.first()
-                        .mapNotNull { it.heartRate }
-                        .minOrNull()
-                    val calibratedPayload = DataMap().apply {
-                        putBoolean(Link.KEY_CALIBRATED, model != null)
-                        if (restingHr != null) {
-                            putFloat(Link.KEY_RESTING_HR, restingHr)
-                        }
-                    }.toByteArray()
-                    Wearable.getMessageClient(applicationContext)
-                        .sendMessage(event.sourceNodeId, Link.PATH_CALIBRATION, calibratedPayload)
-                        .await()
-                } catch (_: Exception) {
-                }
-
-                // Re-send monitoring settings to this node: a reading proves
-                // the watch is reachable, which covers reconnects and watch
-                // app reinstalls. Only once the user has configured them —
-                // otherwise the watch keeps its existing schedule.
-                try {
-                    val monitoringPrefs = MonitoringPrefs(applicationContext)
-                    if (monitoringPrefs.isConfigured()) {
-                        WatchConfigSender.sendToNode(
-                            applicationContext,
-                            event.sourceNodeId,
-                            monitoringPrefs.config.value,
-                        )
-                    }
-                } catch (_: Exception) {
-                }
+                // The watch is fully programmed on every reading (config,
+                // calibration, resting HR — covers reconnects, updates and
+                // reinstalls). See pushFullSync.
+                pushFullSync(event.sourceNodeId)
             } catch (_: Exception) {
                 // Never crash the listener on a malformed message.
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // One-tap updater + settings sync (v1.15+).
+    // ------------------------------------------------------------------
+
+    /** The watch answered PATH_APK_BEGIN: record its version for the UI. */
+    private fun handleApkReady(event: MessageEvent) {
+        try {
+            val map = DataMap.fromByteArray(event.data)
+            val versionCode = map.getLong(Link.KEY_APK_VERSION_CODE)
+            val versionName = map.getString(Link.KEY_APK_VERSION_NAME).orEmpty()
+            val needsUpdate = map.getBoolean(Link.KEY_APK_NEEDS_UPDATE)
+            WatchUpdateState.onWatchInfo(versionCode, versionName)
+            if (!needsUpdate) {
+                WatchUpdateState.upToDate("$versionName ($versionCode)")
+            }
+            // When an update IS needed, the updater UI is already watching
+            // for the version and proceeds to beam the APK.
+        } catch (_: Exception) {
+        }
+    }
+
+    /** The watch reports what happened with the delivered APK. */
+    private fun handleApkResult(event: MessageEvent) {
+        try {
+            val map = DataMap.fromByteArray(event.data)
+            val message = map.getString(Link.KEY_APK_MESSAGE).orEmpty()
+            when (map.getString(Link.KEY_APK_RESULT).orEmpty()) {
+                "installing" -> WatchUpdateState.waitingWatch(message)
+                "up_to_date" -> WatchUpdateState.upToDate(
+                    WatchUpdateState.state.value.watchVersion ?: "",
+                )
+                "failed" -> WatchUpdateState.error(message)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /** The watch reported its installed version. */
+    private fun handleWatchInfo(event: MessageEvent) {
+        try {
+            val map = DataMap.fromByteArray(event.data)
+            WatchUpdateState.onWatchInfo(
+                map.getLong(Link.KEY_APK_VERSION_CODE),
+                map.getString(Link.KEY_APK_VERSION_NAME).orEmpty(),
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * The watch pushed its monitoring config on connect. If the phone was
+     * reinstalled/wiped (never configured) and the watch has real settings,
+     * adopt them — the watch becomes the bridge that saves the user from
+     * re-entering everything. Otherwise the phone's config wins and is
+     * pushed back so both sides converge.
+     */
+    private fun handleWatchConfig(event: MessageEvent) {
+        scope.launch {
+            try {
+                val map = DataMap.fromByteArray(event.data)
+                if (!map.containsKey(Link.KEY_CONFIG_V)) return@launch
+                val watchConfig = MonitoringConfig(
+                    continuousHr = map.getBoolean(Link.KEY_CONTINUOUS_HR),
+                    hrHighEnabled = map.getBoolean(Link.KEY_HR_HIGH_ENABLED),
+                    hrHighThreshold = map.getInt(Link.KEY_HR_HIGH_THRESHOLD, 120),
+                    bpIntervalMinutes = map.getInt(Link.KEY_BP_INTERVAL_MIN),
+                    bpHighEnabled = map.getBoolean(Link.KEY_BP_HIGH_ENABLED),
+                    sysHigh = map.getInt(Link.KEY_SYS_HIGH, 140),
+                    diaHigh = map.getInt(Link.KEY_DIA_HIGH, 90),
+                    bpLowEnabled = map.getBoolean(Link.KEY_BP_LOW_ENABLED),
+                    sysLow = map.getInt(Link.KEY_SYS_LOW, 90),
+                    diaLow = map.getInt(Link.KEY_DIA_LOW, 60),
+                )
+                val prefs = MonitoringPrefs(applicationContext)
+                if (!prefs.isConfigured() && watchConfig != MonitoringConfig()) {
+                    prefs.update { watchConfig }
+                } else if (prefs.isConfigured()) {
+                    WatchConfigSender.sendToNode(
+                        applicationContext,
+                        event.sourceNodeId,
+                        prefs.config.value,
+                    )
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** The watch asked for the full config + calibration state. */
+    private fun handleConfigRequest(event: MessageEvent) {
+        scope.launch {
+            try {
+                pushFullSync(event.sourceNodeId)
+            } catch (_: Exception) {
             }
         }
     }

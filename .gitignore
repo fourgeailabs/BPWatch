@@ -10,3 +10,7 @@ local.properties
 # OS noise
 .DS_Store
 .kotlin/
+# Exception: the pinned *debug* keystore is intentionally committed so every
+# build (local + CI) shares one signature and updates preserve user data.
+# Release keys must still never be committed.
+!keystore/bpwatch-debug.keystore

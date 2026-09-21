@@ -37,7 +37,24 @@
                     android:host="*"
                     android:pathPrefix="/bpwatch" />
             </intent-filter>
+            <!-- One-tap updater (v1.15+): the APK arrives as a DataItem. -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.DATA_CHANGED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/bpwatch" />
+            </intent-filter>
         </service>
+
+        <!-- Result of a self-update install session (v1.15+). -->
+        <receiver
+            android:name="com.fourgeailabs.bpwatch.wear.UpdateResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.fourgeailabs.bpwatch.wear.UPDATE_RESULT" />
+            </intent-filter>
+        </receiver>
 
         <!-- Continuous heart-rate monitoring: foreground service, health type
              (API 34+ requires the type declared here plus the

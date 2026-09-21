@@ -13,8 +13,8 @@ android {
         minSdk = 30 // Wear OS 3+
         targetSdk = 34
         // Kept in sync with :mobile (see its versioning policy comment).
-        versionCode = 18
-        versionName = "1.14.0"
+        versionCode = 19
+        versionName = "1.15.0"
     }
 
     buildTypes {
@@ -23,8 +23,21 @@ android {
         }
     }
 
+    signingConfigs {
+        // Pinned debug keystore shared with :mobile — see the comment there.
+        // Both APKs must keep a stable signature or updates wipe user data.
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/bpwatch-debug.keystore")
+            storePassword = "android"
+            keyAlias = "bpwatch-debug"
+            keyPassword = "android"
+        }
+    }
+
     buildFeatures {
         compose = true
+        // Needed so the watch UI can show its own version (update check).
+        buildConfig = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

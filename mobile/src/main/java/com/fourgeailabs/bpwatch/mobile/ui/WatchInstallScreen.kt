@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -24,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,15 +38,21 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.fourgeailabs.bpwatch.mobile.adb.WatchInstaller
+import com.fourgeailabs.bpwatch.mobile.wearable.WatchUpdateState
+import com.fourgeailabs.bpwatch.mobile.wearable.WatchUpdater
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 /**
- * Installs/updates the watch app over Wi-Fi debugging. The watch APK is
- * bundled inside this phone APK (see bundleWearApk), so updates ship with
- * every phone build — no PC or cable needed after the first setup.
+ * Watch app updates, two ways: the one-tap updater at the top (beams the
+ * bundled watch APK over Bluetooth — no debugging), and the Wi-Fi debugging
+ * installer below for first-time installs. The watch APK is bundled inside
+ * this phone APK (see bundleWearApk), so updates ship with every phone
+ * build — no PC or cable needed after the first setup.
  */
 @Composable
 fun WatchInstallScreen() {
@@ -199,15 +207,24 @@ fun WatchInstallScreen() {
     ) {
         Text("Watch app", style = MaterialTheme.typography.headlineMedium)
         Text(
-            "Install or update BPWatch on your Galaxy Watch over Wi-Fi — " +
-                "no PC or cable needed. The watch app is bundled inside this " +
-                "phone app, so every phone update carries the latest watch build.",
+            "Update BPWatch on your Galaxy Watch with one tap — no debugging, " +
+                "no PC or cable. The watch app is bundled inside this phone " +
+                "app, so every phone update carries the latest watch build.",
             style = MaterialTheme.typography.bodyMedium,
         )
+
+        WatchUpdaterCard()
+
         Text(
-            "On the watch: Settings → Developer options → Wireless debugging → " +
-                "turn it on. First pair once using step 1 below, then " +
-                "install using the IP and port from the main wireless-debugging screen.",
+            "First-time install over Wi-Fi debugging",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            "Only needed once, to get BPWatch onto a fresh watch — after " +
+                "that, use the one-tap updater above. On the watch: " +
+                "Settings → Developer options → Wireless debugging → turn " +
+                "it on. Pair once using step 1 below, then install using the " +
+                "IP and port from the main wireless-debugging screen.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -347,5 +364,161 @@ fun WatchInstallScreen() {
             }
         }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * One-tap watch updater (v1.15+): beams the bundled watch APK to the watch
+ * over Bluetooth and the watch installs it itself. No debugging, no IP
+ * addresses — and every setting on the watch survives the update.
+ */
+@Composable
+private fun WatchUpdaterCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val ui by WatchUpdateState.state.collectAsState()
+
+    val busyUpdater = ui.status == WatchUpdateState.Status.CHECKING ||
+        ui.status == WatchUpdateState.Status.SENDING
+    val terminal = ui.status == WatchUpdateState.Status.DONE ||
+        ui.status == WatchUpdateState.Status.UP_TO_DATE ||
+        ui.status == WatchUpdateState.Status.ERROR ||
+        ui.status == WatchUpdateState.Status.WAITING_WATCH
+
+    // Read the bundled watch version once, and ask the watch for its own.
+    LaunchedEffect(Unit) {
+        val bundled = withContext(Dispatchers.IO) { WatchUpdater.getBundledApk(context) }
+        if (bundled != null) {
+            WatchUpdateState.setBundled(bundled.versionCode, bundled.versionName)
+        }
+        withContext(Dispatchers.IO) { WatchUpdater.requestWatchInfo(context) }
+    }
+
+    fun startUpdate() {
+        scope.launch {
+            WatchUpdateState.reset()
+            val bundled = withContext(Dispatchers.IO) { WatchUpdater.getBundledApk(context) }
+            if (bundled == null) {
+                WatchUpdateState.error("Couldn't read the bundled watch app from this phone build.")
+                return@launch
+            }
+            WatchUpdateState.setBundled(bundled.versionCode, bundled.versionName)
+            WatchUpdateState.checking("Asking the watch what it's running…")
+            val mark = System.currentTimeMillis()
+            val asked = withContext(Dispatchers.IO) { WatchUpdater.sendBegin(context, bundled) }
+            if (!asked) {
+                WatchUpdateState.error(
+                    "No watch reachable — is Bluetooth on and the watch connected?",
+                )
+                return@launch
+            }
+            // Wait for the watch's PATH_APK_READY reply (30s).
+            val reply = withTimeoutOrNull(30_000L) {
+                WatchUpdateState.state.first { s ->
+                    s.lastReadyAt > mark ||
+                        s.status == WatchUpdateState.Status.UP_TO_DATE ||
+                        s.status == WatchUpdateState.Status.ERROR
+                }
+            }
+            if (reply == null) {
+                WatchUpdateState.error(
+                    "The watch didn't answer. If it's on an older version, update it once " +
+                        "with the debugging installer below — one-tap updates work after that.",
+                )
+                return@launch
+            }
+            if (reply.status == WatchUpdateState.Status.UP_TO_DATE ||
+                reply.status == WatchUpdateState.Status.ERROR
+            ) {
+                return@launch // the state already carries the message
+            }
+            WatchUpdateState.sending(
+                "Sending the update to your watch — keep this screen open. " +
+                    "It's about 20 MB over Bluetooth, so give it a few minutes.",
+            )
+            val beamed = withContext(Dispatchers.IO) { WatchUpdater.sendApk(context, bundled) }
+            if (!beamed) {
+                WatchUpdateState.error(
+                    "Couldn't beam the update. Keep the watch close and try again.",
+                )
+                return@launch
+            }
+            // Wait for the watch to confirm it received the APK (10 min).
+            val result = withTimeoutOrNull(10 * 60_000L) {
+                WatchUpdateState.state.first { s ->
+                    s.status == WatchUpdateState.Status.DONE ||
+                        s.status == WatchUpdateState.Status.UP_TO_DATE ||
+                        s.status == WatchUpdateState.Status.ERROR ||
+                        s.status == WatchUpdateState.Status.WAITING_WATCH
+                }
+            }
+            if (result == null) {
+                WatchUpdateState.error(
+                    "Sent, but the watch hasn't confirmed. Check the watch — " +
+                        "it may be waiting for your tap.",
+                )
+            }
+            // Otherwise the listener already recorded the outcome.
+        }
+    }
+
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TintedIcon(icon = Icons.Filled.SystemUpdate, contentDescription = null)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "Update watch app",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        "One tap — no debugging",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Text(
+                "Beams the latest watch build to your watch over Bluetooth and " +
+                    "the watch installs it itself. Your thresholds and check " +
+                    "schedule survive every update — nothing to re-enter.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "In this phone app: watch v${ui.bundledVersion ?: "…"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "On your watch now: v${ui.watchVersion ?: "unknown yet"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (ui.status != WatchUpdateState.Status.IDLE && ui.message.isNotEmpty()) {
+                Text(
+                    ui.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (ui.status == WatchUpdateState.Status.ERROR) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            if (busyUpdater) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = ::startUpdate, enabled = !busyUpdater) {
+                    Text(if (terminal) "Check again" else "Send update to watch")
+                }
+            }
+        }
     }
 }
