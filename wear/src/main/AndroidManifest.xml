@@ -96,6 +96,14 @@
         </receiver>
 
         <receiver
+            android:name="com.fourgeailabs.bpwatch.wear.StepsReportReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.fourgeailabs.bpwatch.wear.REPORT_STEPS" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
             android:name="com.fourgeailabs.bpwatch.wear.BootReceiver"
             android:exported="false">
             <intent-filter>

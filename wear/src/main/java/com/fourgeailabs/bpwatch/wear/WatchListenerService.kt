@@ -55,6 +55,7 @@ class WatchListenerService : WearableListenerService() {
             // any samples the phone hasn't ACKed yet.
             try {
                 RecordScheduler.ensureScheduled(this@WatchListenerService)
+                StepsScheduler.ensureScheduled(this@WatchListenerService)
             } catch (_: Exception) {
             }
             try {

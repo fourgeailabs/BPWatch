@@ -20,6 +20,20 @@ data class ChangelogEntry(
 /** Newest first. The full history starts at the first public version. */
 val CHANGELOG: List<ChangelogEntry> = listOf(
     ChangelogEntry(
+        versionName = "2.3.1",
+        versionCode = 26,
+        date = "2026-09-21",
+        notes = listOf(
+            "Steps stay fresh: the watch now pushes its step count every 15 minutes " +
+                "on its own schedule (plus with every scheduled BP check), instead of " +
+                "only on Bluetooth reconnect or while continuous recording is on.",
+            "Steps match Samsung Health: when Health Connect is linked, the Home tile " +
+                "prefers its merged phone-plus-watch step count over the watch-only number.",
+            "Stress Trends finally shows history without continuous recording — the graph " +
+                "now includes the stress score from every BP check alongside recorded samples.",
+        ),
+    ),
+    ChangelogEntry(
         versionName = "2.3.0",
         versionCode = 25,
         date = "2026-09-21",

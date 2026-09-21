@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
         // Alarms don't survive app updates — re-arm if needed.
         CheckScheduler.ensureScheduled(this)
         RecordScheduler.ensureScheduled(this)
+        StepsScheduler.ensureScheduled(this)
         // Continuous-HR service resumes here after reboot (it can't be
         // started from the boot receiver on Android 12+).
         try {

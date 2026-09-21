@@ -289,8 +289,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (_: Exception) {
                 null
             }
-            // v2.2: prefer the watch's own step count when it reported today;
-            // fall back to Health Connect steps otherwise.
+            // v2.3.1: the watch's own step count for today, used as a fallback
+            // when Health Connect has no merged steps to offer.
             val watchStepsToday = try {
                 val today = java.time.LocalDate.now(java.time.ZoneId.systemDefault())
                     .format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
@@ -339,7 +339,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 null
             }
             _dashboard.value = DashboardMetrics(
-                steps = watchStepsToday ?: t?.steps,
+                // v2.3.1: prefer Health Connect's merged cross-device steps
+                // (phone + watch, matches Samsung Health); the watch-only
+                // count is the fallback.
+                steps = t?.steps ?: watchStepsToday,
                 distanceMi = t?.distanceMeters?.let { it / 1609.344 },
                 caloriesKcal = t?.caloriesKcal,
                 heartRateBpm = t?.heartRateBpm?.toInt(),

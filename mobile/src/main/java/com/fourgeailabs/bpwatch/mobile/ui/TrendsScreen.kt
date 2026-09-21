@@ -191,7 +191,17 @@ fun TrendsScreen(
         // sparse metrics just show their sparse points.
         val hrPoints = hrSamples.map { ChartPoint(it.timestamp, it.bpm) }
             .let { if (range == TrendRange.HOUR) bucketHourly(it, start) else it }
-        val stressPoints = stressSamples.map { ChartPoint(it.timestamp, it.score.toFloat()) }
+        // v2.3.1: stress history merges the 10-minute recorded samples with
+        // the per-check stress scores stored on readings (every BP check
+        // estimates stress too) — the graph no longer needs continuous
+        // recording switched on to show history.
+        val stressPoints = (
+            stressSamples.map { ChartPoint(it.timestamp, it.score.toFloat()) } +
+                readings.mapNotNull { r ->
+                    r.stress?.takeIf { it >= 0 && r.timestamp in start..now }
+                        ?.let { ChartPoint(r.timestamp, it.toFloat()) }
+                }
+            ).sortedBy { it.x }
             .let { if (range == TrendRange.HOUR) bucketHourly(it, start) else it }
         when (metric) {
             TrendMetric.HEART_RATE -> listOf(
@@ -349,9 +359,14 @@ fun TrendsScreen(
                 ) {
                     Text(
                         when (metric) {
-                            TrendMetric.HEART_RATE, TrendMetric.STRESS ->
+                            TrendMetric.HEART_RATE ->
                                 "No recordings yet. Turn on \"Record heart rate continuously\" " +
                                     "in Settings to start building history."
+                            // v2.3.1: stress history also comes from BP checks,
+                            // so the copy no longer points only at recording.
+                            TrendMetric.STRESS ->
+                                "No stress data yet. Take a BP check on the watch, or turn on " +
+                                    "\"Record heart rate continuously\" in Settings for regular samples."
                             else -> "No data for this range yet."
                         },
                         style = MaterialTheme.typography.bodyMedium,

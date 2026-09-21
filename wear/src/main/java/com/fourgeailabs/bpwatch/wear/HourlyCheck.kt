@@ -213,6 +213,13 @@ class HourlyCheckReceiver : BroadcastReceiver() {
                         System.currentTimeMillis(),
                         stress,
                     )
+                    // v2.3.1: push the step count alongside every scheduled
+                    // check too — free freshness on top of the 15-minute
+                    // StepsScheduler chain.
+                    try {
+                        StepsReporter.maybeReport(context.applicationContext)
+                    } catch (_: Exception) {
+                    }
                     CheckScheduler.chainNext(context)
                 }
             } catch (_: Exception) {
@@ -245,6 +252,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             CheckScheduler.ensureScheduled(context)
             RecordScheduler.ensureScheduled(context)
+            StepsScheduler.ensureScheduled(context)
             // Re-announce to the phone after a reboot: it re-sends the
             // monitoring config + calibration state, so a wiped watch
             // re-programs itself without anyone touching a thing.
