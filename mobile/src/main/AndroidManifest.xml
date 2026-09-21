@@ -17,6 +17,18 @@
     <uses-permission android:name="android.permission.health.WRITE_HYDRATION" />
     <uses-permission android:name="android.permission.health.WRITE_NUTRITION" />
 
+    <!-- v2.2 full-coverage reads: everything Health Connect offers that maps
+         to real fitness data (no ECG type exists in Health Connect; Samsung's
+         ECG stays behind its partner-only SDK). -->
+    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
+    <uses-permission android:name="android.permission.health.READ_RESPIRATORY_RATE" />
+    <uses-permission android:name="android.permission.health.READ_VO2_MAX" />
+    <uses-permission android:name="android.permission.health.READ_BODY_FAT" />
+    <uses-permission android:name="android.permission.health.READ_BASAL_METABOLIC_RATE" />
+    <uses-permission android:name="android.permission.health.READ_FLOORS_CLIMBED" />
+    <uses-permission android:name="android.permission.health.READ_LEAN_BODY_MASS" />
+
     <!-- Watch installer: ADB-over-Wi-Fi socket to the watch -->
     <uses-permission android:name="android.permission.INTERNET" />
 

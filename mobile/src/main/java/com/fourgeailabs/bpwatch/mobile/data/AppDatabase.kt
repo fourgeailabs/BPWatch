@@ -46,14 +46,15 @@ interface HealthLogDao {
 }
 
 @Database(
-    entities = [Reading::class, HealthLog::class, HrSample::class, StressSample::class],
-    version = 4,
+    entities = [Reading::class, HealthLog::class, HrSample::class, StressSample::class, WatchSteps::class],
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun readingDao(): ReadingDao
     abstract fun healthLogDao(): HealthLogDao
     abstract fun sampleDao(): SampleDao
+    abstract fun watchStepsDao(): WatchStepsDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -91,6 +92,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS watch_steps (" +
+                        "date TEXT PRIMARY KEY NOT NULL, " +
+                        "steps INTEGER NOT NULL, " +
+                        "updatedAt INTEGER NOT NULL)"
+                )
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -101,7 +113,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "bpwatch.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build().also { INSTANCE = it }
             }
     }

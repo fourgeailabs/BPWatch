@@ -120,6 +120,22 @@ object Link {
      * PATH_CALIBRATION. Sent on watch boot and peer connect. */
     const val PATH_CONFIG_REQUEST = "/bpwatch/config_request"
 
+    // ------------------------------------------------------------------
+    // Watch-native steps (v2.2). The watch reads its own step counter via
+    // Health Services and reports today's total; the phone prefers this
+    // fresh count on the Steps tile, falling back to Health Connect.
+    // ------------------------------------------------------------------
+    /**
+     * Watch → phone: today's step total, read on the watch itself.
+     * Payload: KEY_STEPS (long), KEY_STEP_DATE ("yyyy-MM-dd" in the
+     * watch's zone), KEY_TIMESTAMP. Sent when the count changes (after
+     * each recording tick and on peer connect); the phone stores it
+     * date-keyed, so reboots and reinstalls can't corrupt history.
+     */
+    const val PATH_STEPS_DAILY = "/bpwatch/steps_daily"
+    const val KEY_STEPS = "steps"
+    const val KEY_STEP_DATE = "step_date"
+
     const val KEY_ALERT_TYPE = "alert_type"
     const val KEY_SEVERITY = "severity"
     const val KEY_ALERT_TITLE = "alert_title"

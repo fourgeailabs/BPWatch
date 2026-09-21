@@ -4,6 +4,8 @@ import com.fourgeailabs.bpwatch.Link
 import com.fourgeailabs.bpwatch.mobile.BpRepository
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationEngine
 import com.fourgeailabs.bpwatch.mobile.data.Reading
+import com.fourgeailabs.bpwatch.mobile.data.AppDatabase
+import com.fourgeailabs.bpwatch.mobile.data.WatchSteps
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringConfig
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringPrefs
@@ -36,6 +38,7 @@ class PhoneListenerService : WearableListenerService() {
             Link.PATH_INTERVAL_SET -> handleIntervalSet(event)
             Link.PATH_HR_READING -> handleHrReading(event)
             Link.PATH_HR_LIVE -> handleHrLive(event)
+            Link.PATH_STEPS_DAILY -> handleStepsDaily(event)
             Link.PATH_ALERT -> handleAlert(event)
             Link.PATH_APK_READY -> handleApkReady(event)
             Link.PATH_APK_RESULT -> handleApkResult(event)
@@ -152,6 +155,30 @@ class PhoneListenerService : WearableListenerService() {
             WatchLiveState.updateLiveHr(map.getFloat(Link.KEY_HEART_RATE))
         } catch (_: Exception) {
             // Never crash the listener on a malformed message.
+        }
+    }
+
+    /**
+     * The watch reported its daily step total (PATH_STEPS_DAILY, v2.2).
+     * Date-keyed upsert; later reports for the same day overwrite. The
+     * dashboard falls back to Health Connect steps when no row exists.
+     */
+    private fun handleStepsDaily(event: MessageEvent) {
+        scope.launch {
+            try {
+                val map = DataMap.fromByteArray(event.data)
+                val date = map.getString(Link.KEY_STEP_DATE).orEmpty()
+                if (date.isEmpty()) return@launch
+                AppDatabase.get(applicationContext).watchStepsDao().upsert(
+                    WatchSteps(
+                        date = date,
+                        steps = map.getLong(Link.KEY_STEPS),
+                        updatedAt = System.currentTimeMillis(),
+                    ),
+                )
+            } catch (_: Exception) {
+                // Never crash the listener on a malformed message.
+            }
         }
     }
 

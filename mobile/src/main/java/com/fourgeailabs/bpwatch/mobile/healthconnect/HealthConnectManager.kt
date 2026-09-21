@@ -12,16 +12,24 @@ import androidx.health.connect.client.aggregate.AggregationResult
 import androidx.health.connect.client.request.AggregateGroupByDurationRequest
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.BasalMetabolicRateRecord
 import androidx.health.connect.client.records.BloodPressureRecord
+import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.FloorsClimbedRecord
 import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
 import androidx.health.connect.client.records.HydrationRecord
+import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.MealType
 import androidx.health.connect.client.records.NutritionRecord
 import androidx.health.connect.client.records.OxygenSaturationRecord
+import androidx.health.connect.client.records.RespiratoryRateRecord
+import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
+import androidx.health.connect.client.records.Vo2MaxRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -95,6 +103,18 @@ class HealthConnectManager(private val context: Context) {
         HealthPermission.getWritePermission(WeightRecord::class),
         HealthPermission.getWritePermission(HydrationRecord::class),
         HealthPermission.getWritePermission(NutritionRecord::class),
+        // Full-coverage reads (v2.2): everything Health Connect offers that
+        // maps to real fitness data. Deliberately no ECG — Health Connect
+        // has no ECG record type and Samsung's ECG lives behind its
+        // partner-only Privileged Health SDK.
+        HealthPermission.getReadPermission(RestingHeartRateRecord::class),
+        HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class),
+        HealthPermission.getReadPermission(RespiratoryRateRecord::class),
+        HealthPermission.getReadPermission(Vo2MaxRecord::class),
+        HealthPermission.getReadPermission(BodyFatRecord::class),
+        HealthPermission.getReadPermission(BasalMetabolicRateRecord::class),
+        HealthPermission.getReadPermission(FloorsClimbedRecord::class),
+        HealthPermission.getReadPermission(LeanBodyMassRecord::class),
     )
 
     /**
@@ -152,6 +172,17 @@ class HealthConnectManager(private val context: Context) {
         val short = perm.substringAfterLast('.')
         val granted = context.checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED
         "$short: ${if (granted) "granted ✓" else "not granted"}"
+    }
+
+    /**
+     * The permission strings Health Connect itself reports as granted —
+     * the canonical source for the per-permission Settings list. Never
+     * throws; empty when Health Connect isn't usable.
+     */
+    suspend fun grantedPermissions(): Set<String> = try {
+        client.permissionController.getGrantedPermissions()
+    } catch (_: Exception) {
+        emptySet()
     }
 
     /**
@@ -352,6 +383,57 @@ class HealthConnectManager(private val context: Context) {
                         val hours =
                             rs.sumOf { Duration.between(it.startTime, it.endTime).toMinutes() } / 60f
                         HcTrendPoint(bucket.toEpochMilli(), hours)
+                    }
+                    .sortedBy { it.timestamp }
+            }
+            // v2.2: latest reading per bucket (same shape as WEIGHT).
+            HcTrendMetric.RESTING_HR -> {
+                val records = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = RestingHeartRateRecord::class,
+                        timeRangeFilter = filter,
+                    )
+                ).records
+                records.groupBy { bucketStart(it.time, start, slicer) }
+                    .mapNotNull { (bucket, rs) ->
+                        rs.maxByOrNull { it.time }?.let { r ->
+                            val bpm = r.beatsPerMinute
+                            HcTrendPoint(bucket.toEpochMilli(), bpm.toFloat())
+                        }
+                    }
+                    .sortedBy { it.timestamp }
+            }
+            HcTrendMetric.HRV -> {
+                val records = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = HeartRateVariabilityRmssdRecord::class,
+                        timeRangeFilter = filter,
+                    )
+                ).records
+                records.groupBy { bucketStart(it.time, start, slicer) }
+                    .mapNotNull { (bucket, rs) ->
+                        rs.maxByOrNull { it.time }?.let { r ->
+                            val ms = r.heartRateVariabilityMillis
+                            HcTrendPoint(bucket.toEpochMilli(), ms.toFloat())
+                        }
+                    }
+                    .sortedBy { it.timestamp }
+            }
+            HcTrendMetric.BODY_FAT -> {
+                val records = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = BodyFatRecord::class,
+                        timeRangeFilter = filter,
+                    )
+                ).records
+                records.groupBy { bucketStart(it.time, start, slicer) }
+                    .mapNotNull { (bucket, rs) ->
+                        rs.maxByOrNull { it.time }?.percentage?.let { pct ->
+                            HcTrendPoint(
+                                bucket.toEpochMilli(),
+                                HcUnitReaders.percentage(pct).toFloat(),
+                            )
+                        }
                     }
                     .sortedBy { it.timestamp }
             }
@@ -571,7 +653,10 @@ data class Spo2Stats(val count: Int, val newest: java.time.Instant?)
 data class Spo2Sample(val timestamp: Long, val spo2: Int)
 
 /** Health Connect-backed Trends metrics (v2.1): every home tile's landing spot. */
-enum class HcTrendMetric { STEPS, DISTANCE, CALORIES, WEIGHT, SLEEP, HYDRATION }
+enum class HcTrendMetric {
+    STEPS, DISTANCE, CALORIES, WEIGHT, SLEEP, HYDRATION,
+    RESTING_HR, HRV, BODY_FAT,
+}
 
 /** One bucketed point of a Health Connect Trends metric. */
 data class HcTrendPoint(val timestamp: Long, val value: Float)

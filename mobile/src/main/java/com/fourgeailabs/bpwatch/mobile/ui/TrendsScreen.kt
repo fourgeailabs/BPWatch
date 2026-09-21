@@ -54,7 +54,8 @@ import java.util.Locale
 
 /**
  * Trends metrics. The first four are the v2.0 set; the rest (v2.1) give
- * every home tile a landing spot. Public so HomeScreen can deep-link here.
+ * every home tile a landing spot; the v2.2 additions round out Health
+ * Connect coverage. Public so HomeScreen can deep-link here.
  */
 enum class TrendMetric(val label: String) {
     HEART_RATE("Heart rate"),
@@ -67,12 +68,17 @@ enum class TrendMetric(val label: String) {
     WEIGHT("Weight"),
     SLEEP("Sleep"),
     HYDRATION("Hydration"),
+    RESTING_HR("Resting HR"),
+    HRV("HRV"),
+    BODY_FAT("Body fat"),
+    BMI("BMI"),
 }
 
-/** True for the Health Connect-backed metrics (everything after SpO2). */
+/** True for the Health Connect-backed metrics (everything after SpO2, except BMI which is computed from weight). */
 private fun TrendMetric.isHcTrend(): Boolean = when (this) {
     TrendMetric.STEPS, TrendMetric.DISTANCE, TrendMetric.CALORIES,
-    TrendMetric.WEIGHT, TrendMetric.SLEEP, TrendMetric.HYDRATION -> true
+    TrendMetric.WEIGHT, TrendMetric.SLEEP, TrendMetric.HYDRATION,
+    TrendMetric.RESTING_HR, TrendMetric.HRV, TrendMetric.BODY_FAT -> true
     else -> false
 }
 
@@ -83,6 +89,9 @@ private fun TrendMetric.toHcTrendMetric(): HcTrendMetric = when (this) {
     TrendMetric.WEIGHT -> HcTrendMetric.WEIGHT
     TrendMetric.SLEEP -> HcTrendMetric.SLEEP
     TrendMetric.HYDRATION -> HcTrendMetric.HYDRATION
+    TrendMetric.RESTING_HR -> HcTrendMetric.RESTING_HR
+    TrendMetric.HRV -> HcTrendMetric.HRV
+    TrendMetric.BODY_FAT -> HcTrendMetric.BODY_FAT
     else -> error("not a Health Connect trend metric: $this")
 }
 
@@ -140,6 +149,7 @@ fun TrendsScreen(
         viewModel.observeStressRange(start, now)
     }.collectAsState(initial = emptyList())
     val readings by viewModel.readings.collectAsState()
+    val profile by viewModel.userProfile.collectAsState()
 
     var spo2 by remember { mutableStateOf<List<Spo2Sample>>(emptyList()) }
     var hcAvailable by remember { mutableStateOf(false) }
@@ -166,10 +176,23 @@ fun TrendsScreen(
                 bucketHours = if (range == TrendRange.HOUR || range == TrendRange.DAY) 1L else 24L,
             )
             hcTrendLoading = false
+        } else if (metric == TrendMetric.BMI) {
+            // BMI isn't a Health Connect trend: it's computed from the weight
+            // trend plus the profile height, so only the weight trend loads here.
+            hcTrendLoading = true
+            hcAvailable = viewModel.isHcTrendsAvailable()
+            hcTrend = viewModel.loadHcTrendRange(
+                HcTrendMetric.WEIGHT,
+                Instant.ofEpochMilli(start),
+                Instant.ofEpochMilli(now),
+                // Hourly buckets for the short ranges, daily beyond that.
+                bucketHours = if (range == TrendRange.HOUR || range == TrendRange.DAY) 1L else 24L,
+            )
+            hcTrendLoading = false
         }
     }
 
-    val series: List<ChartSeries> = remember(metric, range, hrSamples, stressSamples, readings, spo2, hcTrend, start, now) {
+    val series: List<ChartSeries> = remember(metric, range, hrSamples, stressSamples, readings, spo2, hcTrend, profile, start, now) {
         // Hour range: dense watch samples collapse to hourly averages;
         // sparse metrics just show their sparse points.
         val hrPoints = hrSamples.map { ChartPoint(it.timestamp, it.bpm) }
@@ -232,6 +255,31 @@ fun TrendsScreen(
             TrendMetric.WEIGHT -> hcSeries("Weight", Color(0xFF0B8043), "lb", hcTrend)
             TrendMetric.SLEEP -> hcSeries("Sleep", Color(0xFF3949AB), "h", hcTrend)
             TrendMetric.HYDRATION -> hcSeries("Hydration", Color(0xFF039BE5), "L", hcTrend)
+            TrendMetric.RESTING_HR -> hcSeries("Resting HR", Color(0xFFD81B60), "bpm", hcTrend)
+            TrendMetric.HRV -> hcSeries("HRV", Color(0xFF00897B), "ms", hcTrend)
+            TrendMetric.BODY_FAT -> hcSeries("Body fat", Color(0xFF6D4C41), "%", hcTrend)
+            TrendMetric.BMI -> {
+                // Computed from the loaded weight trend (lb) and the profile
+                // height. No height or no weight data means empty points,
+                // which shows the standard "No data" state — nothing faked.
+                val heightM = profile.heightCm?.takeIf { it > 0f }?.div(100f)
+                val bmiPoints = if (heightM != null) {
+                    hcTrend.map { p ->
+                        val kg = p.value / 2.20462f
+                        ChartPoint(p.timestamp, kg / (heightM * heightM))
+                    }
+                } else {
+                    emptyList()
+                }
+                listOf(
+                    ChartSeries(
+                        label = "BMI",
+                        color = Color(0xFF5E35B1),
+                        unit = "",
+                        points = bmiPoints,
+                    )
+                )
+            }
         }
     }
 

@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -90,7 +91,7 @@ fun SettingsScreen(
                 hcGranted = viewModel.hcGranted,
                 hcStatusText = viewModel.hcStatusText,
                 hcNeedsUpdate = viewModel.hcNeedsUpdate,
-                hcPermissionDetails = viewModel.hcPermissionDetails,
+                hcGrantedSet = viewModel.hcGrantedSet,
                 spo2Diagnostic = viewModel.spo2Diagnostic,
                 hcPermissions = viewModel.hcPermissions,
                 hcReadPermissions = viewModel.hcReadPermissions,
@@ -310,7 +311,7 @@ private fun SamsungHealthCard(
     hcGranted: Boolean,
     hcStatusText: String,
     hcNeedsUpdate: Boolean,
-    hcPermissionDetails: List<String>,
+    hcGrantedSet: Set<String>,
     spo2Diagnostic: String,
     hcPermissions: Set<String>,
     hcReadPermissions: Set<String>,
@@ -373,22 +374,39 @@ private fun SamsungHealthCard(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            // Per-permission diagnostics: shows exactly what Android thinks is granted.
-            if (hcPermissionDetails.isNotEmpty()) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    shape = MaterialTheme.shapes.small,
-                ) {
-                    Column(
-                        Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
+            // Per-permission status: which declared permissions Android
+            // reports as granted, each with its own re-request button.
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                hcPermissions.sorted().forEach { perm ->
+                    val granted = perm in hcGrantedSet
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        hcPermissionDetails.forEach { line ->
-                            Text(
-                                text = line,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                        Icon(
+                            if (granted) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+                            contentDescription = null,
+                            tint = if (granted) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = perm.substringAfterLast('.'),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = if (granted) "granted" else "not granted",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (granted) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                        )
+                        if (!granted) {
+                            TextButton(onClick = { onRequestPermissions(setOf(perm)) }) {
+                                Text("Request")
+                            }
                         }
                     }
                 }

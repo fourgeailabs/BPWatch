@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.health.connect.client.HealthConnectClient
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationModel
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationPoint
+import com.fourgeailabs.bpwatch.mobile.data.AppDatabase
 import com.fourgeailabs.bpwatch.mobile.data.HealthLog
 import com.fourgeailabs.bpwatch.mobile.data.Reading
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
@@ -64,7 +65,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     )
         private set
     /** Per-permission Android runtime status, for diagnostics. */
-    var hcPermissionDetails: List<String> by mutableStateOf(hc.permissionStatusLines())
+    /** Permission strings Health Connect itself reports as granted (v2.2). */
+    var hcGrantedSet: Set<String> by mutableStateOf(emptySet())
         private set
     /**
      * SpO2 diagnostic line for Settings, e.g. "SpO2 records (7d): 14 ·
@@ -103,12 +105,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         hcStatusText = hc.sdkStatusText()
         hcNeedsUpdate =
             hc.sdkStatus == HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED
-        hcPermissionDetails = hc.permissionStatusLines()
         viewModelScope.launch {
             hcGranted = try {
                 hc.isAvailable && hc.hasPermissions()
             } catch (_: Exception) {
                 false
+            }
+            hcGrantedSet = try {
+                if (hc.isAvailable) hc.grantedPermissions() else emptySet()
+            } catch (_: Exception) {
+                emptySet()
             }
             // SpO2 reads only need the read grant — never the BP write one.
             val readGranted = try {
@@ -170,8 +176,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (_: Exception) {
                 null
             }
+            // v2.2: prefer the watch's own step count when it reported today;
+            // fall back to Health Connect steps otherwise.
+            val watchStepsToday = try {
+                val today = java.time.LocalDate.now(java.time.ZoneId.systemDefault())
+                    .format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+                AppDatabase.get(getApplication()).watchStepsDao().stepsForDate(today)
+            } catch (_: Exception) {
+                null
+            }
+            // v2.2 BMI: profile height + latest weight (Health Connect first,
+            // profile fallback). Nothing faked — null when either is missing.
+            val profile = userProfile.value
+            val heightCm = profile.heightCm
+            val weightKg = t?.weightKg ?: profile.weightKg?.toDouble()
+            val bmi = if (heightCm != null && heightCm > 0f &&
+                weightKg != null && weightKg > 0
+            ) {
+                val m = heightCm / 100.0
+                weightKg / (m * m)
+            } else {
+                null
+            }
+            val bmiLabel = when {
+                bmi == null -> null
+                bmi < 18.5 -> "Underweight"
+                bmi < 25.0 -> "Healthy"
+                bmi < 30.0 -> "Overweight"
+                else -> "Obese"
+            }
             _dashboard.value = DashboardMetrics(
-                steps = t?.steps,
+                steps = watchStepsToday ?: t?.steps,
                 distanceMi = t?.distanceMeters?.let { it / 1609.344 },
                 caloriesKcal = t?.caloriesKcal,
                 heartRateBpm = t?.heartRateBpm?.toInt(),
@@ -179,6 +214,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 sleepHours = t?.sleepHours,
                 hydrationMl = t?.hydrationLiters?.let { it * 1000.0 },
                 spo2 = spo2Now,
+                bmi = bmi,
+                bmiLabel = bmiLabel,
                 hcReadGranted = true,
             )
         }
@@ -486,6 +523,9 @@ data class DashboardMetrics(
     val sleepHours: Double? = null,
     val hydrationMl: Double? = null,
     val spo2: Int? = null,
+    /** v2.2: derived from profile height + latest weight (HC preferred). */
+    val bmi: Double? = null,
+    val bmiLabel: String? = null,
     val hcReadGranted: Boolean = false,
 )
 

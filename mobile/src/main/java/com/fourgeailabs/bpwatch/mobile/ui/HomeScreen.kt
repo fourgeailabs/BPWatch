@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Scale
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.WaterDrop
@@ -369,6 +370,19 @@ private fun MetricGrid(
             HealthTile(Icons.Filled.Air, "Blood oxygen", spo2Text, Color(0xFF0B8043)) {
                 onOpenTrends(TrendMetric.SPO2)
             }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            HealthTile(
+                Icons.Filled.Scale,
+                "BMI",
+                dashboard.bmi?.let {
+                    "%.1f".format(it) + (dashboard.bmiLabel?.let { l -> " · $l" } ?: "")
+                },
+                Color(0xFF5E35B1),
+            ) {
+                onOpenTrends(TrendMetric.BMI)
+            }
+            Spacer(Modifier.weight(1f))
         }
     }
 }

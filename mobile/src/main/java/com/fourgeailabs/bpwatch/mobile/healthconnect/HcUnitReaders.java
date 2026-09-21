@@ -3,6 +3,8 @@ package com.fourgeailabs.bpwatch.mobile.healthconnect;
 import androidx.health.connect.client.units.Energy;
 import androidx.health.connect.client.units.Length;
 import androidx.health.connect.client.units.Mass;
+import androidx.health.connect.client.units.Percentage;
+import androidx.health.connect.client.units.Power;
 import androidx.health.connect.client.units.Volume;
 
 /**
@@ -35,5 +37,13 @@ public final class HcUnitReaders {
 
     public static double liters(Volume volume) {
         return volume.getLiters();
+    }
+
+    public static double percentage(Percentage percentage) {
+        return percentage.getValue();
+    }
+
+    public static double watts(Power power) {
+        return power.getWatts();
     }
 }

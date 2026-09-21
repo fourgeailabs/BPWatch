@@ -124,6 +124,12 @@ class RecordSampleReceiver : BroadcastReceiver() {
                         ),
                     )
                     HistorySync.maybeSync(context.applicationContext)
+                    // Report today's step count to the phone alongside the
+                    // history sync — best effort, never breaks recording.
+                    try {
+                        StepsReporter.maybeReport(context.applicationContext)
+                    } catch (_: Exception) {
+                    }
                 }
             } catch (_: Exception) {
                 // A recording tick must never crash.

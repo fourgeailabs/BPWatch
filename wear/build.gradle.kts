@@ -13,8 +13,8 @@ android {
         minSdk = 30 // Wear OS 3+
         targetSdk = 34
         // Kept in sync with :mobile (see its versioning policy comment).
-        versionCode = 23
-        versionName = "2.1.0"
+        versionCode = 24
+        versionName = "2.2.0"
     }
 
     buildTypes {

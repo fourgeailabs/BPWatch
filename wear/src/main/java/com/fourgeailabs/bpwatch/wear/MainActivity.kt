@@ -58,6 +58,12 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { /* re-checked before each measurement */ }
 
+    // v2.2: step-counter reads need this on API 29+. Without it the watch
+    // can't report steps and the phone falls back to Health Connect.
+    private val activityRecognitionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* re-checked before each step read */ }
+
     private val notificationLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { /* alerts degrade to the full-screen activity only */ }
@@ -77,6 +83,7 @@ class MainActivity : ComponentActivity() {
         }
         hrMonitor = HeartRateMonitor(this)
         ensureBodySensorPermission()
+        ensureActivityRecognitionPermission()
         ensureNotificationPermission()
         setContent {
             MaterialTheme {
@@ -90,6 +97,16 @@ class MainActivity : ComponentActivity() {
             PackageManager.PERMISSION_GRANTED
         ) {
             bodySensorLauncher.launch(Manifest.permission.BODY_SENSORS)
+        }
+    }
+
+    private fun ensureActivityRecognitionPermission() {
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACTIVITY_RECOGNITION,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            activityRecognitionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
         }
     }
 

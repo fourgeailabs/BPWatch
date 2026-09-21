@@ -59,6 +59,12 @@ class WatchListenerService : WearableListenerService() {
                 HistorySync.pushAll(this@WatchListenerService)
             } catch (_: Exception) {
             }
+            // Report today's step count to the phone (date-keyed; the phone
+            // falls back to Health Connect when the watch can't report).
+            try {
+                StepsReporter.maybeReport(this@WatchListenerService)
+            } catch (_: Exception) {
+            }
         }
     }
 
