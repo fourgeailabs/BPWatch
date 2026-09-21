@@ -500,6 +500,15 @@ private fun WatchUpdaterCard() {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (!watchSupportsOneTap(ui.watchVersion)) {
+                Text(
+                    "First time? The watch needs v1.15.0 or newer installed once via " +
+                        "the Wi-Fi debugging installer below — only then can it " +
+                        "receive one-tap updates.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (ui.status != WatchUpdateState.Status.IDLE && ui.message.isNotEmpty()) {
                 Text(
                     ui.message,
@@ -521,4 +530,13 @@ private fun WatchUpdaterCard() {
             }
         }
     }
+}
+
+/** True when the watch is known to run a build containing the one-tap updater (v1.15.0+). */
+private fun watchSupportsOneTap(version: String?): Boolean {
+    if (version == null) return false
+    val parts = version.substringBefore(" ").split(".")
+    if (parts.size < 3) return false
+    val numbers = parts.take(3).map { it.toIntOrNull() ?: return false }
+    return numbers[0] * 10000 + numbers[1] * 100 + numbers[2] >= 11500
 }

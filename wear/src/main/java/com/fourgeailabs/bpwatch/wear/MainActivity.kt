@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,14 +23,17 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.fourgeailabs.bpwatch.BuildConfig
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
@@ -220,20 +225,32 @@ private fun BpWatchApp(
         vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
     ) {
         val listState = rememberScalingLazyListState()
-        ScalingLazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            state = listState,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "BPWatch",
-                    style = MaterialTheme.typography.title3,
-                    color = MaterialTheme.colors.onBackground.copy(alpha = 0.75f),
-                    textAlign = TextAlign.Center,
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Loading ring hugs the screen edge while measuring or sending —
+            // never a little spinner floating in the middle.
+            if (uiState == UiState.MEASURING || uiState == UiState.SENDING) {
+                EdgeProgressRing(
+                    progress = if (uiState == UiState.MEASURING) progress else null,
+                    modifier = Modifier.fillMaxSize(),
                 )
+            }
+            ScalingLazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = listState,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Clear the TimeText the Scaffold draws at the top edge.
+                    Spacer(Modifier.height(26.dp))
+                    Text(
+                        text = "BPWatch",
+                        style = MaterialTheme.typography.title3,
+                        color = MaterialTheme.colors.onBackground.copy(alpha = 0.75f),
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
 
             when (uiState) {
@@ -290,20 +307,24 @@ private fun BpWatchApp(
                     item { Spacer(Modifier.height(24.dp)) }
                     item {
                         // The reading is the hero: dead centre of the display.
+                        // (Both texts must live in a Column — bare siblings in
+                        // an item stack on top of each other like a Box.)
                         val est = lastEstimate
-                        Text(
-                            text = if (est != null) "${est.sys}/${est.dia}" else "--/--",
-                            style = MaterialTheme.typography.display2,
-                            textAlign = TextAlign.Center,
-                        )
-                        Text(
-                            text = if (est != null) "mmHg · ${timeAgo(est.timestamp)}"
-                            else if (calibrated) "Calibrated — take a reading"
-                            else "Take a reading when ready",
-                            style = MaterialTheme.typography.caption2,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = if (est != null) "${est.sys}/${est.dia}" else "--/--",
+                                style = MaterialTheme.typography.display2,
+                                textAlign = TextAlign.Center,
+                            )
+                            Text(
+                                text = if (est != null) "mmHg · ${timeAgo(est.timestamp)}"
+                                else if (calibrated) "Calibrated — take a reading"
+                                else "Take a reading when ready",
+                                style = MaterialTheme.typography.caption2,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                            )
+                        }
                     }
                     item { Spacer(Modifier.height(16.dp)) }
                     item {
@@ -316,23 +337,25 @@ private fun BpWatchApp(
                     }
                     item {
                         val cfg = monitorConfig
-                        Chip(
-                            onClick = { pickingInterval = true },
-                            label = { Text("Blood-pressure checks") },
-                            secondaryLabel = {
-                                Text(bpIntervalLabel(cfg?.bpIntervalMinutes ?: 0))
-                            },
-                            modifier = Modifier.fillMaxWidth(0.85f),
-                        )
-                        if (cfg?.continuousHr == true && liveContinuousHr > 0) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = "♥ ${liveContinuousHr.toInt()} bpm",
-                                style = MaterialTheme.typography.title3,
-                                textAlign = TextAlign.Center,
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Chip(
+                                onClick = { pickingInterval = true },
+                                label = { Text("Blood-pressure checks") },
+                                secondaryLabel = {
+                                    Text(bpIntervalLabel(cfg?.bpIntervalMinutes ?: 0))
+                                },
+                                modifier = Modifier.fillMaxWidth(0.85f),
                             )
+                            if (cfg?.continuousHr == true && liveContinuousHr > 0) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "♥ ${liveContinuousHr.toInt()} bpm",
+                                    style = MaterialTheme.typography.title3,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                            Spacer(Modifier.height(24.dp))
                         }
-                        Spacer(Modifier.height(24.dp))
                     }
                     item {
                         // Version stamp: confirms at a glance which build is
@@ -348,54 +371,68 @@ private fun BpWatchApp(
 
                 UiState.MEASURING -> {
                     item {
-                        Spacer(Modifier.height(24.dp))
-                        ShiftingProgressIndicator(progress = progress)
-                    }
-                    item {
-                        Text(
-                            text = if (liveHr > 0) "${liveHr.toInt()} bpm" else "Reading…",
-                            style = MaterialTheme.typography.display3,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                    item {
-                        Text(
-                            text = "Sit still, arm at heart level",
-                            style = MaterialTheme.typography.caption2,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                        )
-                        Spacer(Modifier.height(24.dp))
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Spacer(Modifier.height(20.dp))
+                            // One shared heartbeat: the red heart AND the red
+                            // bpm number below it both thump at the live rate.
+                            val beatScale = rememberHeartbeatScale(liveHr)
+                            BeatingHeart(beatScale = beatScale)
+                            Text(
+                                text = if (liveHr > 0) "${liveHr.toInt()} bpm" else "Reading…",
+                                style = MaterialTheme.typography.display3,
+                                textAlign = TextAlign.Center,
+                                color = Color.Red,
+                                modifier = Modifier.graphicsLayer(
+                                    scaleX = beatScale,
+                                    scaleY = beatScale,
+                                ),
+                            )
+                            Text(
+                                text = "Sit still, arm at heart level",
+                                style = MaterialTheme.typography.caption2,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                            )
+                            Spacer(Modifier.height(24.dp))
+                        }
                     }
                 }
 
                 UiState.SENDING -> {
                     item {
-                        Spacer(Modifier.height(24.dp))
-                        ShiftingProgressIndicator(progress = null)
-                    }
-                    item {
-                        Text("Sending to phone…", textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(24.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Spacer(Modifier.height(24.dp))
+                            Text("Sending to phone…", textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(24.dp))
+                        }
                     }
                 }
 
                 UiState.DONE -> {
                     item {
-                        Spacer(Modifier.height(24.dp))
-                        Text(
-                            text = "Sent ✓",
-                            style = MaterialTheme.typography.title2,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                    item {
-                        sentHr?.let {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Spacer(Modifier.height(24.dp))
                             Text(
-                                "Avg heart rate: ${it.toInt()} bpm",
+                                text = "Sent ✓",
+                                style = MaterialTheme.typography.title2,
                                 textAlign = TextAlign.Center,
                             )
                         }
+                    }
+                    item {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            sentHr?.let {
+                                Text(
+                                    "Avg heart rate: ${it.toInt()} bpm",
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
                         if (sentStress >= 0) {
                             Text(
                                 "Stress: $sentStress/100 (${StressEstimator.label(sentStress)})",
@@ -405,6 +442,7 @@ private fun BpWatchApp(
                             )
                         }
                     }
+                }
                     item {
                         Text(
                             text = "Your estimate will appear here once the phone works it out.",
@@ -414,54 +452,62 @@ private fun BpWatchApp(
                         )
                     }
                     item {
-                        Chip(
-                            onClick = { uiState = UiState.IDLE },
-                            label = { Text("Done", textAlign = TextAlign.Center) },
-                            modifier = Modifier.fillMaxWidth(0.85f),
-                            colors = ChipDefaults.primaryChipColors(),
-                        )
-                        Spacer(Modifier.height(24.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Chip(
+                                onClick = { uiState = UiState.IDLE },
+                                label = { Text("Done", textAlign = TextAlign.Center) },
+                                modifier = Modifier.fillMaxWidth(0.85f),
+                                colors = ChipDefaults.primaryChipColors(),
+                            )
+                            Spacer(Modifier.height(24.dp))
+                        }
                     }
                 }
 
                 UiState.ERROR -> {
                     item {
-                        Spacer(Modifier.height(24.dp))
-                        Text(
-                            text = errorMessage,
-                            style = MaterialTheme.typography.body2,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Spacer(Modifier.height(24.dp))
+                            Text(
+                                text = errorMessage,
+                                style = MaterialTheme.typography.body2,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                            )
+                        }
                     }
                     item {
-                        Chip(
-                            onClick = { startMeasurement() },
-                            label = { Text("Try again", textAlign = TextAlign.Center) },
-                            modifier = Modifier.fillMaxWidth(0.85f),
-                            colors = ChipDefaults.primaryChipColors(),
-                        )
-                        Spacer(Modifier.height(24.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Chip(
+                                onClick = { startMeasurement() },
+                                label = { Text("Try again", textAlign = TextAlign.Center) },
+                                modifier = Modifier.fillMaxWidth(0.85f),
+                                colors = ChipDefaults.primaryChipColors(),
+                            )
+                            Spacer(Modifier.height(24.dp))
+                        }
                     }
                 }
             }
         }
     }
 }
+}
 
-/** Google brand colours used for the shifting progress indicator. */
+/** Google brand colours used for the shifting progress ring. */
 private val GoogleBlue = Color(0xFF4285F4)
 private val GoogleRed = Color(0xFFEA4335)
 private val GoogleYellow = Color(0xFFFBBC05)
 private val GoogleGreen = Color(0xFF34A853)
 
 /**
- * A progress indicator whose ring colour continuously shifts through the
- * Google brand colours while it spins. Pass null for [progress] for the
+ * A progress ring that hugs the circumference of the watch screen edge,
+ * drawn full-bleed behind the content. Its colour continuously shifts
+ * through the Google brand colours. Pass null for [progress] for the
  * indeterminate (sending) state.
  */
 @Composable
-fun ShiftingProgressIndicator(progress: Float?) {
+fun EdgeProgressRing(progress: Float?, modifier: Modifier = Modifier) {
     val googleColors = remember { listOf(GoogleBlue, GoogleRed, GoogleYellow, GoogleGreen) }
     var shiftingColor by remember { mutableStateOf(GoogleBlue) }
     // Manual colour tween loop — no animation library needed on Wear.
@@ -479,16 +525,58 @@ fun ShiftingProgressIndicator(progress: Float?) {
             index++
         }
     }
+    val ringModifier = modifier.padding(5.dp)
     if (progress == null) {
         CircularProgressIndicator(
+            modifier = ringModifier,
             indicatorColor = shiftingColor,
-            strokeWidth = 6.dp,
+            strokeWidth = 5.dp,
         )
     } else {
         CircularProgressIndicator(
             progress = progress,
+            modifier = ringModifier,
             indicatorColor = shiftingColor,
-            strokeWidth = 6.dp,
+            strokeWidth = 5.dp,
         )
     }
+}
+
+/**
+ * Drives one shared heartbeat scale while the watch scans. The beat rate
+ * follows the live heart-rate reading (falling back to 60 bpm until the
+ * sensor locks on). Manual scale tween — no animation library needed on Wear.
+ */
+@Composable
+fun rememberHeartbeatScale(liveHr: Float): Float {
+    var beatScale by remember { mutableFloatStateOf(1f) }
+    val bpmNow by rememberUpdatedState(if (liveHr > 0f) liveHr else 60f)
+    LaunchedEffect(Unit) {
+        suspend fun tweenScale(from: Float, to: Float, durationMs: Long) {
+            val steps = 6
+            repeat(steps) { i ->
+                beatScale = from + (to - from) * (i + 1) / steps.toFloat()
+                delay(durationMs / steps)
+            }
+        }
+        while (true) {
+            val intervalMs = (60_000f / bpmNow).toLong().coerceIn(350L, 1500L)
+            tweenScale(1f, 1.35f, 110)
+            tweenScale(1.35f, 1f, 160)
+            delay((intervalMs - 270).coerceAtLeast(150))
+        }
+    }
+    return beatScale
+}
+
+/** A big red heart that beats with the shared heartbeat scale. */
+@Composable
+fun BeatingHeart(beatScale: Float) {
+    Text(
+        text = "♥",
+        color = Color.Red,
+        fontSize = 64.sp,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.graphicsLayer(scaleX = beatScale, scaleY = beatScale),
+    )
 }
