@@ -15,6 +15,24 @@ object Link {
      * so both sides stay in sync.
      */
     const val PATH_INTERVAL_SET = "/bpwatch/interval_set"
+    /**
+     * Watch → phone: live heart-rate tick, throttled to ~10s while measuring
+     * or continuously monitoring. Payload: KEY_HEART_RATE + KEY_TIMESTAMP.
+     * Lets the phone mirror what the watch is showing, live.
+     */
+    const val PATH_HR_LIVE = "/bpwatch/hr_live"
+    /**
+     * Watch → phone: an alert fired on the watch. Payload: KEY_ALERT_TYPE,
+     * KEY_SEVERITY, KEY_ALERT_TITLE, KEY_ALERT_MESSAGE, KEY_TIMESTAMP.
+     * The phone mirrors it as a notification — or a full-screen takeover
+     * for extreme readings.
+     */
+    const val PATH_ALERT = "/bpwatch/alert"
+
+    const val KEY_ALERT_TYPE = "alert_type"
+    const val KEY_SEVERITY = "severity"
+    const val KEY_ALERT_TITLE = "alert_title"
+    const val KEY_ALERT_MESSAGE = "alert_message"
 
     const val KEY_HEART_RATE = "heart_rate"
     const val KEY_TIMESTAMP = "timestamp"
@@ -38,4 +56,31 @@ object Link {
     const val KEY_BP_LOW_ENABLED = "bp_low_enabled"
     const val KEY_SYS_LOW = "sys_low"
     const val KEY_DIA_LOW = "dia_low"
+
+    /** Alert types carried on PATH_ALERT. */
+    object AlertType {
+        const val HR_HIGH = "hr_high"
+        const val HR_LOW = "hr_low"
+        const val BP_HIGH = "bp_high"
+        const val BP_LOW = "bp_low"
+    }
+
+    /** Alert severities carried on PATH_ALERT. */
+    object Severity {
+        const val NORMAL = "normal"
+        const val EXTREME = "extreme"
+    }
+
+    /**
+     * Fixed extreme thresholds for v1.14.0 (not yet user-configurable).
+     * Crossing one of these fires a full-screen takeover alert on the phone.
+     */
+    object ExtremeThresholds {
+        const val HR_HIGH = 160f
+        const val HR_LOW = 40f
+        const val SYS_HIGH = 180
+        const val DIA_HIGH = 120
+        const val SYS_LOW = 80
+        const val DIA_LOW = 50
+    }
 }

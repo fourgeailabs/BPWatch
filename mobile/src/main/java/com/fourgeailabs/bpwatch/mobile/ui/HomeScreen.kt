@@ -34,9 +34,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.fourgeailabs.bpwatch.Link
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
+import com.fourgeailabs.bpwatch.mobile.wearable.WatchLiveState
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -56,6 +59,10 @@ fun HomeScreen(viewModel: MainViewModel, onOpenCalibrate: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("BPWatch", style = MaterialTheme.typography.headlineMedium)
+
+        // Live mirror of the watch: current heart rate and latest alert,
+        // updated in real time while the app is open.
+        WatchLiveCard()
 
         // Hero: latest blood pressure.
         Card(
@@ -274,4 +281,82 @@ private fun formatTime(epochMillis: Long): String {
     val formatter = DateTimeFormatter.ofPattern("d MMM, h:mm a")
         .withZone(ZoneId.systemDefault())
     return formatter.format(Instant.ofEpochMilli(epochMillis))
+}
+
+/**
+ * Live mirror of the watch: the current heart rate as the watch shows it
+ * (throttled live ticks while measuring or continuously monitoring) plus the
+ * most recent alert that fired on the watch.
+ */
+@Composable
+private fun WatchLiveCard() {
+    val liveHr by WatchLiveState.liveHr.collectAsState()
+    val liveHrAt by WatchLiveState.liveHrAt.collectAsState()
+    val lastAlert by WatchLiveState.lastAlert.collectAsState()
+
+    val fresh = liveHrAt > 0L &&
+        System.currentTimeMillis() - liveHrAt < 60_000L
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Favorite,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                    text = "Watch live",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                if (fresh) {
+                    Text(
+                        text = "● live",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF1B7A3D),
+                    )
+                }
+            }
+            Text(
+                text = if (liveHr != null && fresh) {
+                    "♥ ${liveHr!!.toInt()} bpm"
+                } else {
+                    "♥ — bpm"
+                },
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Text(
+                text = if (fresh) {
+                    "From your watch · ${formatTime(liveHrAt)}"
+                } else {
+                    "Waiting for your watch — it sends live ticks while measuring or monitoring."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            lastAlert?.let { alert ->
+                val extreme = alert.severity == Link.Severity.EXTREME
+                Text(
+                    text = (if (extreme) "⚠ " else "") +
+                        "${alert.title} · ${formatTime(alert.at)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (extreme) Color(0xFFB3261E)
+                    else MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+        }
+    }
 }

@@ -13,15 +13,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -167,6 +171,13 @@ private fun BpWatchApp(
                 delay(step)
                 elapsed += step
                 progress = elapsed / MEASURE_DURATION_MS.toFloat()
+                // Live tick every 5s so the phone mirrors the measurement.
+                if (elapsed % 5_000L == 0L && liveHr > 0f) {
+                    try {
+                        DataLayer.sendHrLive(appContext, liveHr)
+                    } catch (_: Exception) {
+                    }
+                }
             }
             monitor.stop()
             val valid = samples.filter { it in 25f..250f }
@@ -327,10 +338,7 @@ private fun BpWatchApp(
                 UiState.MEASURING -> {
                     item {
                         Spacer(Modifier.height(24.dp))
-                        CircularProgressIndicator(
-                            progress = progress,
-                            strokeWidth = 6.dp,
-                        )
+                        ShiftingProgressIndicator(progress = progress)
                     }
                     item {
                         Text(
@@ -353,7 +361,7 @@ private fun BpWatchApp(
                 UiState.SENDING -> {
                     item {
                         Spacer(Modifier.height(24.dp))
-                        CircularProgressIndicator(strokeWidth = 6.dp)
+                        ShiftingProgressIndicator(progress = null)
                     }
                     item {
                         Text("Sending to phone…", textAlign = TextAlign.Center)
@@ -427,5 +435,49 @@ private fun BpWatchApp(
                 }
             }
         }
+    }
+}
+
+/** Google brand colours used for the shifting progress indicator. */
+private val GoogleBlue = Color(0xFF4285F4)
+private val GoogleRed = Color(0xFFEA4335)
+private val GoogleYellow = Color(0xFFFBBC05)
+private val GoogleGreen = Color(0xFF34A853)
+
+/**
+ * A progress indicator whose ring colour continuously shifts through the
+ * Google brand colours while it spins. Pass null for [progress] for the
+ * indeterminate (sending) state.
+ */
+@Composable
+fun ShiftingProgressIndicator(progress: Float?) {
+    val googleColors = remember { listOf(GoogleBlue, GoogleRed, GoogleYellow, GoogleGreen) }
+    var shiftingColor by remember { mutableStateOf(GoogleBlue) }
+    // Manual colour tween loop — no animation library needed on Wear.
+    LaunchedEffect(Unit) {
+        var index = 0
+        val steps = 30
+        val stepDelayMs = 30L
+        while (true) {
+            val from = googleColors[index % googleColors.size]
+            val to = googleColors[(index + 1) % googleColors.size]
+            repeat(steps) { step ->
+                shiftingColor = lerp(from, to, (step + 1) / steps.toFloat())
+                delay(stepDelayMs)
+            }
+            index++
+        }
+    }
+    if (progress == null) {
+        CircularProgressIndicator(
+            indicatorColor = shiftingColor,
+            strokeWidth = 6.dp,
+        )
+    } else {
+        CircularProgressIndicator(
+            progress = progress,
+            indicatorColor = shiftingColor,
+            strokeWidth = 6.dp,
+        )
     }
 }

@@ -91,8 +91,12 @@ object WatchSettings {
 
     /** Alert types for the per-type cooldown. */
     const val ALERT_HR_HIGH = "alert_hr_high"
+    const val ALERT_HR_LOW_EXTREME = "alert_hr_low_extreme"
+    const val ALERT_HR_HIGH_EXTREME = "alert_hr_high_extreme"
     const val ALERT_BP_HIGH = "alert_bp_high"
+    const val ALERT_BP_HIGH_EXTREME = "alert_bp_high_extreme"
     const val ALERT_BP_LOW = "alert_bp_low"
+    const val ALERT_BP_LOW_EXTREME = "alert_bp_low_extreme"
     private const val KEY_LAST_ALERT_PREFIX = "last_alert_"
 
     fun getMonitorConfig(context: Context): MonitorConfig {

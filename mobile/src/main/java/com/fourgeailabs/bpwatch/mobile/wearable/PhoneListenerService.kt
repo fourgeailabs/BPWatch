@@ -33,6 +33,8 @@ class PhoneListenerService : WearableListenerService() {
         when (event.path) {
             Link.PATH_INTERVAL_SET -> handleIntervalSet(event)
             Link.PATH_HR_READING -> handleHrReading(event)
+            Link.PATH_HR_LIVE -> handleHrLive(event)
+            Link.PATH_ALERT -> handleAlert(event)
         }
     }
 
@@ -47,6 +49,49 @@ class PhoneListenerService : WearableListenerService() {
                     .getInt(Link.KEY_BP_INTERVAL_MIN)
                 MonitoringPrefs(applicationContext).update {
                     it.copy(bpIntervalMinutes = minutes)
+                }
+            } catch (_: Exception) {
+                // Never crash the listener on a malformed message.
+            }
+        }
+    }
+
+    /**
+     * Throttled live heart-rate tick from the watch (manual measurement or
+     * continuous monitoring). Updates the in-app live mirror.
+     */
+    private fun handleHrLive(event: MessageEvent) {
+        try {
+            val map = DataMap.fromByteArray(event.data)
+            WatchLiveState.updateLiveHr(map.getFloat(Link.KEY_HEART_RATE))
+        } catch (_: Exception) {
+            // Never crash the listener on a malformed message.
+        }
+    }
+
+    /**
+     * An alert fired on the watch. Mirror it in the app's live state and as
+     * a phone notification — a full-screen takeover for extreme readings.
+     */
+    private fun handleAlert(event: MessageEvent) {
+        scope.launch {
+            try {
+                val map = DataMap.fromByteArray(event.data)
+                val alert = WatchAlert(
+                    type = map.getString(Link.KEY_ALERT_TYPE).orEmpty(),
+                    severity = map.getString(Link.KEY_SEVERITY).orEmpty(),
+                    title = map.getString(Link.KEY_ALERT_TITLE).orEmpty(),
+                    message = map.getString(Link.KEY_ALERT_MESSAGE).orEmpty(),
+                    at = map.getLong(Link.KEY_TIMESTAMP),
+                )
+                if (alert.title.isEmpty()) return@launch
+                WatchLiveState.postAlert(alert)
+                try {
+                    NotificationHelper.notifyWatchAlert(
+                        applicationContext,
+                        alert,
+                    )
+                } catch (_: Exception) {
                 }
             } catch (_: Exception) {
                 // Never crash the listener on a malformed message.

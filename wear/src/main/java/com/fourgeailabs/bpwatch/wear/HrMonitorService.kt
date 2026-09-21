@@ -45,6 +45,9 @@ class HrMonitorService : Service() {
     /** Timestamped samples for the current upload window. */
     private val window = ArrayDeque<Pair<Long, Float>>()
 
+    /** Last time a live HR tick was sent to the phone (throttled). */
+    private var lastLiveSendMs = 0L
+
     override fun onCreate() {
         super.onCreate()
         ensureChannel()
@@ -117,6 +120,17 @@ class HrMonitorService : Service() {
                     }
                 }
                 WatchState.onLiveHr(hr)
+                // Throttled live tick so the phone can mirror the watch.
+                val nowLive = System.currentTimeMillis()
+                if (nowLive - lastLiveSendMs >= LIVE_TICK_MS) {
+                    lastLiveSendMs = nowLive
+                    scope.launch {
+                        try {
+                            DataLayer.sendHrLive(applicationContext, hr)
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
                 try {
                     AlertManager.checkHeartRate(applicationContext, hr)
                 } catch (_: Exception) {
@@ -193,6 +207,9 @@ class HrMonitorService : Service() {
 
         /** How often the continuous stream uploads an averaged reading. */
         private const val UPLOAD_INTERVAL_MS = 15 * 60_000L
+
+        /** How often a live HR tick is sent to the phone for mirroring. */
+        private const val LIVE_TICK_MS = 10_000L
 
         fun start(context: Context) {
             val intent = Intent(context, HrMonitorService::class.java).setAction(ACTION_START)

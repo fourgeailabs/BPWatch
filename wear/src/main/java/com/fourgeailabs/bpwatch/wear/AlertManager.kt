@@ -7,15 +7,22 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import com.fourgeailabs.bpwatch.Link
 import com.fourgeailabs.bpwatch.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
- * Threshold alerts on the watch. Each alert type (high HR, high BP, low BP)
- * has a 15-minute cooldown so a persisting condition doesn't buzz on every
- * reading.
+ * Threshold alerts on the watch. Each alert type (high HR, low HR, high BP,
+ * low BP — each with normal and extreme severities) has a 15-minute cooldown
+ * so a persisting condition doesn't buzz on every reading.
  *
  * An alert is a high-priority notification with a vibration pattern plus a
- * full-screen [AlertActivity] showing the offending value.
+ * full-screen [AlertActivity] showing the offending value. It is also
+ * forwarded to the phone over the Data Layer: normal alerts become phone
+ * notifications, extreme ones take over the phone screen.
  */
 object AlertManager {
     private const val CHANNEL_ID = "bpwatch_alerts"
@@ -23,26 +30,72 @@ object AlertManager {
     private const val NOTIF_ID_HR = 3001
     private const val NOTIF_ID_BP = 3002
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     fun checkHeartRate(context: Context, hr: Float) {
         val config = WatchSettings.getMonitorConfig(context)
-        if (!config.hrHighEnabled) return
-        if (hr <= config.hrHighThreshold) return
-        if (!cooldownElapsed(context, WatchSettings.ALERT_HR_HIGH)) return
-        WatchSettings.setLastAlert(
-            context,
-            WatchSettings.ALERT_HR_HIGH,
-            System.currentTimeMillis(),
-        )
-        fire(
-            context = context,
-            notificationId = NOTIF_ID_HR,
-            title = "High heart rate",
-            message = "${hr.toInt()} bpm — over your ${config.hrHighThreshold} bpm alert limit.",
-        )
+        val extreme = Link.ExtremeThresholds
+        when {
+            hr >= extreme.HR_HIGH -> fireExtreme(
+                context,
+                cooldownKey = WatchSettings.ALERT_HR_HIGH_EXTREME,
+                notificationId = NOTIF_ID_HR,
+                alertType = Link.AlertType.HR_HIGH,
+                title = "Extremely high heart rate",
+                message = "${hr.toInt()} bpm — dangerously high. Sit down and rest; seek help if you feel unwell.",
+            )
+            hr <= extreme.HR_LOW -> fireExtreme(
+                context,
+                cooldownKey = WatchSettings.ALERT_HR_LOW_EXTREME,
+                notificationId = NOTIF_ID_HR,
+                alertType = Link.AlertType.HR_LOW,
+                title = "Extremely low heart rate",
+                message = "${hr.toInt()} bpm — dangerously low. Sit down and rest; seek help if you feel unwell.",
+            )
+            config.hrHighEnabled && hr > config.hrHighThreshold -> {
+                if (!cooldownElapsed(context, WatchSettings.ALERT_HR_HIGH)) return
+                WatchSettings.setLastAlert(
+                    context,
+                    WatchSettings.ALERT_HR_HIGH,
+                    System.currentTimeMillis(),
+                )
+                fire(
+                    context = context,
+                    notificationId = NOTIF_ID_HR,
+                    alertType = Link.AlertType.HR_HIGH,
+                    severity = Link.Severity.NORMAL,
+                    title = "High heart rate",
+                    message = "${hr.toInt()} bpm — over your ${config.hrHighThreshold} bpm alert limit.",
+                )
+            }
+        }
     }
 
     fun checkBloodPressure(context: Context, sys: Int, dia: Int) {
         val config = WatchSettings.getMonitorConfig(context)
+        val extreme = Link.ExtremeThresholds
+        if (sys >= extreme.SYS_HIGH || dia >= extreme.DIA_HIGH) {
+            fireExtreme(
+                context,
+                cooldownKey = WatchSettings.ALERT_BP_HIGH_EXTREME,
+                notificationId = NOTIF_ID_BP,
+                alertType = Link.AlertType.BP_HIGH,
+                title = "Extremely high blood pressure",
+                message = "$sys/$dia mmHg — dangerously high. Sit down and rest; seek help if you feel unwell.",
+            )
+            return
+        }
+        if (sys <= extreme.SYS_LOW || dia <= extreme.DIA_LOW) {
+            fireExtreme(
+                context,
+                cooldownKey = WatchSettings.ALERT_BP_LOW_EXTREME,
+                notificationId = NOTIF_ID_BP,
+                alertType = Link.AlertType.BP_LOW,
+                title = "Extremely low blood pressure",
+                message = "$sys/$dia mmHg — dangerously low. Sit down and rest; seek help if you feel unwell.",
+            )
+            return
+        }
         if (config.bpHighEnabled &&
             (sys >= config.sysHigh || dia >= config.diaHigh)
         ) {
@@ -55,6 +108,8 @@ object AlertManager {
             fire(
                 context = context,
                 notificationId = NOTIF_ID_BP,
+                alertType = Link.AlertType.BP_HIGH,
+                severity = Link.Severity.NORMAL,
                 title = "High blood pressure",
                 message = "$sys/$dia mmHg — at or over your " +
                     "${config.sysHigh}/${config.diaHigh} mmHg alert limit.",
@@ -71,11 +126,33 @@ object AlertManager {
             fire(
                 context = context,
                 notificationId = NOTIF_ID_BP,
+                alertType = Link.AlertType.BP_LOW,
+                severity = Link.Severity.NORMAL,
                 title = "Low blood pressure",
                 message = "$sys/$dia mmHg — at or under your " +
                     "${config.sysLow}/${config.diaLow} mmHg alert limit.",
             )
         }
+    }
+
+    private fun fireExtreme(
+        context: Context,
+        cooldownKey: String,
+        notificationId: Int,
+        alertType: String,
+        title: String,
+        message: String,
+    ) {
+        if (!cooldownElapsed(context, cooldownKey)) return
+        WatchSettings.setLastAlert(context, cooldownKey, System.currentTimeMillis())
+        fire(
+            context = context,
+            notificationId = notificationId,
+            alertType = alertType,
+            severity = Link.Severity.EXTREME,
+            title = title,
+            message = message,
+        )
     }
 
     private fun cooldownElapsed(context: Context, alertType: String): Boolean {
@@ -102,6 +179,8 @@ object AlertManager {
     private fun fire(
         context: Context,
         notificationId: Int,
+        alertType: String,
+        severity: String,
         title: String,
         message: String,
     ) {
@@ -146,6 +225,16 @@ object AlertManager {
             manager.notify(notificationId, notification)
         } catch (_: SecurityException) {
             // POST_NOTIFICATIONS not granted — skip silently.
+        }
+
+        // Forward to the phone: it mirrors the alert as a notification, or a
+        // full-screen takeover for extreme readings. Best effort — the watch
+        // alert itself already fired.
+        scope.launch {
+            try {
+                DataLayer.sendAlert(context, alertType, severity, title, message)
+            } catch (_: Exception) {
+            }
         }
     }
 }
