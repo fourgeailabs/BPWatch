@@ -38,7 +38,6 @@ import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Scale
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -315,34 +314,6 @@ fun HomeScreen(
                     Text("Calibrate", style = MaterialTheme.typography.titleSmall)
                     Text(
                         "Keep estimates accurate with your cuff",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Icon(
-                    Icons.Filled.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        // --- Trends entry: the history graphs, one tap away.
-        ElevatedCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onOpenTrends(TrendMetric.HEART_RATE) },
-        ) {
-            Row(
-                modifier = Modifier.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TintedIcon(Icons.Filled.TrendingUp, contentDescription = null, size = 40.dp)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Trends", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "History graphs for every tile, from hours to years",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

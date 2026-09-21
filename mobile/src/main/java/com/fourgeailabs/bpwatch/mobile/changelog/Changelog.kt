@@ -20,6 +20,18 @@ data class ChangelogEntry(
 /** Newest first. The full history starts at the first public version. */
 val CHANGELOG: List<ChangelogEntry> = listOf(
     ChangelogEntry(
+        versionName = "2.3.3",
+        versionCode = 28,
+        date = "2026-09-21",
+        notes = listOf(
+            "Trends: every single graph now has its own labelled Refresh button — " +
+                "heart rate, stress and blood pressure included, not just the " +
+                "Health Connect ones. No more hunting for it.",
+            "Home: removed the redundant Trends card at the bottom — the bottom " +
+                "tab bar already takes you there.",
+        ),
+    ),
+    ChangelogEntry(
         versionName = "2.3.2",
         versionCode = 27,
         date = "2026-09-21",

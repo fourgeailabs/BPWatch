@@ -24,7 +24,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -155,10 +155,10 @@ fun TrendsScreen(
     val now = remember(range, refreshTick) { System.currentTimeMillis() }
     val start = now - range.millis
 
-    val hrSamples by remember(range) {
+    val hrSamples by remember(range, refreshTick) {
         viewModel.observeHrRange(start, now)
     }.collectAsState(initial = emptyList())
-    val stressSamples by remember(range) {
+    val stressSamples by remember(range, refreshTick) {
         viewModel.observeStressRange(start, now)
     }.collectAsState(initial = emptyList())
     val readings by viewModel.readings.collectAsState()
@@ -340,44 +340,55 @@ fun TrendsScreen(
 
         val hasData = series.any { it.points.isNotEmpty() }
         val hcLoading = hcTrendLoading
-        // v2.3.2: per-trend refresh. Health Connect trends are pulled on
-        // demand (unlike the watch-recorded metrics, which are live from
-        // the local database), so each one gets its own refresh button
-        // with an "updated at" stamp. It sits above the chart AND the
-        // empty state, so a stale "No data" can be re-pulled in place.
-        if (metric.isHcTrend() || metric == TrendMetric.BMI) {
-            val updatedFmt = remember {
-                DateTimeFormatter.ofPattern("h:mm:ss a")
-                    .withZone(ZoneId.systemDefault())
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = when {
-                        hcLoading -> "Updating ${metric.label.lowercase()}…"
-                        lastUpdatedMs != null ->
+        // v2.3.3: every trend gets its own refresh control — no exceptions.
+        // Health Connect trends re-pull from Health Connect; the
+        // watch-recorded metrics (heart rate, stress, blood pressure) are
+        // live from the local database, so their refresh re-anchors the
+        // window to now. A labelled button, not a bare icon: unmissable.
+        // It sits above the chart AND the empty state, so a stale
+        // "No data" can be re-pulled in place.
+        val updatedFmt = remember {
+            DateTimeFormatter.ofPattern("h:mm:ss a")
+                .withZone(ZoneId.systemDefault())
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = when {
+                    hcLoading -> "Updating ${metric.label.lowercase()}…"
+                    metric.isHcTrend() || metric == TrendMetric.BMI ->
+                        if (lastUpdatedMs != null)
                             "Updated ${updatedFmt.format(Instant.ofEpochMilli(lastUpdatedMs!!))}"
-                        else -> "Not updated yet"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
+                        else "Not updated yet"
+                    metric == TrendMetric.HEART_RATE || metric == TrendMetric.STRESS ->
+                        "Live from your watch"
+                    else -> "Live from your BP checks"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (hcLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp,
                 )
-                if (hcLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
+            } else {
+                OutlinedButton(onClick = {
+                    // v2.3.3: the stamp updates on tap; the HC load effect
+                    // below refreshes it again when the pull completes.
+                    lastUpdatedMs = System.currentTimeMillis()
+                    refreshTick++
+                }) {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = null,
                     )
-                } else {
-                    IconButton(onClick = { refreshTick++ }) {
-                        Icon(
-                            Icons.Filled.Refresh,
-                            contentDescription = "Refresh ${metric.label}",
-                        )
-                    }
+                    Spacer(Modifier.width(4.dp))
+                    Text("Refresh")
                 }
             }
         }
