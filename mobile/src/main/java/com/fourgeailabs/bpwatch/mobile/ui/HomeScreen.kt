@@ -1,32 +1,58 @@
 package com.fourgeailabs.bpwatch.mobile.ui
 
+import android.widget.Toast
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DirectionsRun
+import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.MonitorWeight
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,329 +60,625 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.fourgeailabs.bpwatch.Link
+import com.fourgeailabs.bpwatch.mobile.DashboardMetrics
+import com.fourgeailabs.bpwatch.mobile.HealthLogKind
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
+import com.fourgeailabs.bpwatch.mobile.TimelineDay
+import com.fourgeailabs.bpwatch.mobile.TimelineEntry
+import com.fourgeailabs.bpwatch.mobile.TimelineKind
+import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
 import com.fourgeailabs.bpwatch.mobile.wearable.WatchLiveState
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
+private val Navy = Color(0xFF0A1A33)
+private val Crimson = Color(0xFFDC143C)
+private val LiveGreen = Color(0xFF34A853)
+
+/**
+ * v2.0 Home: a Google Health-style dashboard. BP estimate stays the hero,
+ * below it the day's real metrics as tiles, then a grouped timeline of
+ * readings and logs. British spelling throughout, no em dashes in copy.
+ */
 @Composable
-fun HomeScreen(viewModel: MainViewModel, onOpenCalibrate: () -> Unit) {
-    val latest by viewModel.latest.collectAsState()
+fun HomeScreen(
+    viewModel: MainViewModel,
+    onOpenCalibrate: () -> Unit,
+    onOpenWatch: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenTrends: () -> Unit,
+) {
     val readings by viewModel.readings.collectAsState()
-    val model by viewModel.calibrationModel.collectAsState()
-    val spo2 = viewModel.spo2
+    val dashboard by viewModel.dashboard.collectAsState()
+    val timeline by viewModel.timelineDays.collectAsState()
+    var showLogSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) { viewModel.refreshDashboard() }
+
+    val latest = readings.firstOrNull { it.sysEstimate != null || it.sysCuff != null }
+    val sys = latest?.sysEstimate ?: latest?.sysCuff
+    val dia = latest?.diaEstimate ?: latest?.diaCuff
+    val estimated = latest?.sysEstimate != null
 
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("BPWatch", style = MaterialTheme.typography.headlineMedium)
-
-        // Live mirror of the watch: current heart rate and latest alert,
-        // updated in real time while the app is open.
-        WatchLiveCard()
-
-        // Hero: latest blood pressure.
-        Card(
+        // Centred wordmark, like the reference layout.
+        Text(
+            "BPWatch",
+            style = MaterialTheme.typography.headlineMedium,
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-            ),
+        )
+
+        // --- BP hero: deep navy card, crimson heart, white ECG line identity.
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Navy),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(18.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 TintedIcon(
-                    icon = Icons.Filled.MonitorHeart,
+                    Icons.Filled.MonitorHeart,
                     contentDescription = null,
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
                     size = 56.dp,
+                    containerColor = Crimson,
+                    contentColor = Color.White,
                 )
-                val sys = latest?.sysEstimate ?: latest?.sysCuff
-                val dia = latest?.diaEstimate ?: latest?.diaCuff
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (sys != null && dia != null) {
-                        val isEstimate = latest?.sysEstimate != null
-                        Text(
-                            text = "$sys / $dia",
-                            style = MaterialTheme.typography.displayMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                        Text(
-                            text = if (isEstimate) "mmHg · estimated from your calibration"
-                            else "mmHg · cuff reading",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                        latest?.let {
-                            Text(
-                                text = "Measured ${formatTime(it.timestamp)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                    } else {
-                        Text(
-                            text = "No readings yet",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                        Text(
-                            text = if (model == null)
-                                "Head to Calibrate and pair your cuff with the watch first."
-                            else
-                                "Tap Measure on your Galaxy Watch to take a reading.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    }
+                Spacer(Modifier.width(16.dp))
+                Column {
+                    Text(
+                        "BP estimate",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White.copy(alpha = 0.7f),
+                    )
+                    Text(
+                        if (sys != null && dia != null) "$sys / $dia" else "No data",
+                        style = MaterialTheme.typography.displayMedium,
+                        color = Color.White,
+                    )
+                    Text(
+                        "mmHg · " + if (sys != null) {
+                            if (estimated) "Estimated" else "Cuff reading"
+                        } else {
+                            "Calibrate to begin"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.7f),
+                    )
                 }
             }
         }
 
-        // Heart rate + SpO2 metric cards.
+        // --- Primary actions.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            MetricCard(
-                icon = Icons.Filled.Favorite,
-                label = "Heart rate",
-                value = latest?.heartRate?.let { "${it.toInt()} bpm" } ?: "—",
+            Button(
+                onClick = { showLogSheet = true },
                 modifier = Modifier.weight(1f),
-            )
-            MetricCard(
-                icon = Icons.Filled.Air,
-                label = "Blood oxygen",
-                value = spo2?.let { "$it %" } ?: "—",
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Log")
+            }
+            Button(
+                onClick = onOpenWatch,
                 modifier = Modifier.weight(1f),
-            )
+            ) {
+                Icon(Icons.Filled.DirectionsRun, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Start")
+            }
         }
 
-        // Calibrate entry point.
-        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+        if (!dashboard.hcReadGranted) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                ),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Calibrate", style = MaterialTheme.typography.titleMedium)
+                    TintedIcon(Icons.Filled.Info, contentDescription = null, size = 40.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Tiles are empty", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Connect Health Connect to fill them with your real data.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(onClick = onOpenSettings) { Text("Settings") }
+                }
+            }
+        }
+
+        // --- Metric grid: real data only, nothing invented.
+        MetricGrid(dashboard = dashboard)
+
+        // --- Slim calibrate entry.
+        ElevatedCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenCalibrate),
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TintedIcon(Icons.Filled.Tune, contentDescription = null, size = 40.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Calibrate", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Pair cuff readings with your watch to personalise your estimates.",
+                        "Keep estimates accurate with your cuff",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                FilledTonalButton(onClick = onOpenCalibrate) {
-                    Icon(Icons.Filled.MonitorHeart, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Calibrate")
-                }
-            }
-        }
-
-        ManualSpo2Card(viewModel)
-
-        // Recent trend.
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Recent trend", style = MaterialTheme.typography.titleLarge)
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                Box(Modifier.padding(horizontal = 8.dp)) {
-                    BpSparkline(readings)
-                }
-            }
-        }
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Icon(
-                Icons.Filled.Info,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                text = "BPWatch gives wellness estimates based on your own cuff calibration. " +
-                    "It is not a medical device — always confirm with a cuff before making health decisions.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-    }
-}
-
-@Composable
-private fun MetricCard(
-    icon: ImageVector,
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-) {
-    ElevatedCard(modifier = modifier) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            TintedIcon(icon = icon, contentDescription = null)
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.titleLarge,
+                Icon(
+                    Icons.Filled.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
-    }
-}
 
-@Composable
-private fun ManualSpo2Card(viewModel: MainViewModel) {
-    var input by remember { mutableStateOf("") }
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        // --- Trends entry: the history graphs, one tap away.
+        ElevatedCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onOpenTrends),
         ) {
-            Text("Log blood oxygen", style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = "Log it manually, or connect Health Connect in Settings " +
-                    "to pull it in automatically from Samsung Health.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Row(
+                modifier = Modifier.padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it.filter(Char::isDigit).take(3) },
-                    label = { Text("SpO2 %") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                )
-                FilledTonalButton(
-                    onClick = {
-                        input.toIntOrNull()?.let { v ->
-                            if (v in 50..100) {
-                                viewModel.addManualSpo2(v)
-                                input = ""
-                            }
-                        }
-                    }
-                ) {
-                    Text("Save")
+                TintedIcon(Icons.Filled.TrendingUp, contentDescription = null, size = 40.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Trends", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Heart rate, stress, blood pressure and SpO2 graphs",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
+                Icon(
+                    Icons.Filled.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
+
+        // --- Timeline.
+        if (timeline.isNotEmpty()) {
+            timeline.forEach { day -> TimelineDayGroup(day) }
+        } else {
+            Text(
+                "Your readings and logs will appear here.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        Text(
+            "BPWatch gives wellness estimates from your own cuff calibration. " +
+                "It is not a medical device. Check with a cuff before making health decisions.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+    }
+
+    if (showLogSheet) {
+        LogSheet(
+            viewModel = viewModel,
+            onDismiss = { showLogSheet = false },
+        )
     }
 }
 
-private fun formatTime(epochMillis: Long): String {
-    val formatter = DateTimeFormatter.ofPattern("d MMM, h:mm a")
-        .withZone(ZoneId.systemDefault())
-    return formatter.format(Instant.ofEpochMilli(epochMillis))
+/** Two-column grid of health tiles. */
+@Composable
+private fun MetricGrid(dashboard: DashboardMetrics) {
+    val liveHr by WatchLiveState.liveHr.collectAsState()
+    val liveHrAt by WatchLiveState.liveHrAt.collectAsState()
+    val liveFresh = liveHr != null && liveHrAt > 0L && WatchLiveState.isLiveHrFresh()
+
+    val stepsText = dashboard.steps?.let { "%,d".format(Locale.US, it) }
+    val distanceText = dashboard.distanceMi?.let { "%.1f mi".format(Locale.US, it) }
+    val caloriesText = dashboard.caloriesKcal?.let { "${it.toInt()} kcal" }
+    val hrText = when {
+        liveFresh -> "${liveHr!!.toInt()} bpm"
+        dashboard.heartRateBpm != null -> "${dashboard.heartRateBpm} bpm"
+        else -> null
+    }
+    val weightText = dashboard.weightLb?.let {
+        if (it == it.toLong().toDouble()) "${it.toLong()} lb" else "%.1f lb".format(Locale.US, it)
+    }
+    val sleepText = dashboard.sleepHours?.let {
+        val h = it.toInt()
+        val m = ((it - h) * 60).toInt()
+        if (h > 0) "${h}h ${m}m" else "${m}m"
+    }
+    val hydrationText = dashboard.hydrationMl?.let { "${it.toInt()} ml" }
+    val spo2Text = dashboard.spo2?.let { "$it%" }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            HealthTile(Icons.Filled.DirectionsWalk, "Steps", stepsText, Color(0xFF1A73E8))
+            HealthTile(Icons.Filled.Place, "Distance", distanceText, Color(0xFF9334E6))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            HealthTile(Icons.Filled.LocalFireDepartment, "Calories", caloriesText, Color(0xFFEA8600))
+            HealthTile(Icons.Filled.Favorite, "Heart rate", hrText, Color(0xFFD93025), live = liveFresh)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            HealthTile(Icons.Filled.MonitorWeight, "Weight", weightText, Color(0xFF0B8043))
+            HealthTile(Icons.Filled.Bedtime, "Sleep", sleepText, Color(0xFF3949AB))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            HealthTile(Icons.Filled.WaterDrop, "Hydration", hydrationText, Color(0xFF039BE5))
+            HealthTile(Icons.Filled.Air, "Blood oxygen", spo2Text, Color(0xFF0B8043))
+        }
+    }
 }
 
 /**
- * Live mirror of the watch: the current heart rate as the watch shows it
- * (throttled live ticks while measuring or continuously monitoring) plus the
- * most recent alert that fired on the watch.
+ * One metric tile. Tiles with data get a tinted card; empty ones sit back
+ * on surfaceContainerHigh. Nothing is ever faked.
  */
 @Composable
-private fun WatchLiveCard() {
-    val liveHr by WatchLiveState.liveHr.collectAsState()
-    val liveHrAt by WatchLiveState.liveHrAt.collectAsState()
-    val lastAlert by WatchLiveState.lastAlert.collectAsState()
-
-    val fresh = liveHrAt > 0L &&
-        System.currentTimeMillis() - liveHrAt < 60_000L
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+private fun RowScope.HealthTile(
+    icon: ImageVector,
+    label: String,
+    value: String?,
+    accent: Color,
+    live: Boolean = false,
+) {
+    val hasData = value != null
+    ElevatedCard(
+        modifier = Modifier.weight(1f),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = if (hasData) MaterialTheme.colorScheme.tertiaryContainer
+            else MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Favorite,
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TintedIcon(
+                    icon,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    size = 40.dp,
+                    containerColor = accent.copy(alpha = 0.16f),
+                    contentColor = accent,
                 )
-                Text(
-                    text = "Watch live",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-                if (fresh) {
-                    Text(
-                        text = "● live",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF1B7A3D),
+                if (live) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(LiveGreen)
                     )
                 }
             }
+            Spacer(Modifier.height(10.dp))
             Text(
-                text = if (liveHr != null && fresh) {
-                    "♥ ${liveHr!!.toInt()} bpm"
-                } else {
-                    "♥ — bpm"
-                },
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = if (fresh) {
-                    "From your watch · ${formatTime(liveHrAt)}"
-                } else {
-                    "Waiting for your watch — it sends live ticks while measuring or monitoring."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                value ?: "No data",
+                style = MaterialTheme.typography.titleLarge,
+                color = if (hasData) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            lastAlert?.let { alert ->
-                val extreme = alert.severity == Link.Severity.EXTREME
+        }
+    }
+}
+
+/** One day group: wavy divider label, then its entries. */
+@Composable
+private fun TimelineDayGroup(day: TimelineDay) {
+    WavyDivider(day.label)
+    day.entries.forEach { entry ->
+        TimelineRow(entry)
+        Spacer(Modifier.height(4.dp))
+    }
+}
+
+@Composable
+private fun TimelineRow(entry: TimelineEntry) {
+    val icon = when (entry.kind) {
+        TimelineKind.BP -> Icons.Filled.MonitorHeart
+        TimelineKind.WEIGHT -> Icons.Filled.MonitorWeight
+        TimelineKind.HYDRATION -> Icons.Filled.WaterDrop
+        TimelineKind.FOOD -> Icons.Filled.Restaurant
+    }
+    val time = remember(entry.timestamp) {
+        DateTimeFormatter.ofPattern("h:mm a")
+            .withZone(ZoneId.systemDefault())
+            .format(Instant.ofEpochMilli(entry.timestamp))
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TintedIcon(icon, contentDescription = null, size = 42.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                time,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(entry.title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                entry.detail,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Labelled wavy divider, in the spirit of the reference timeline. */
+@Composable
+private fun WavyDivider(label: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        WavyLine(Modifier.weight(1f))
+        Text(
+            label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp),
+        )
+        WavyLine(Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun WavyLine(modifier: Modifier = Modifier) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Canvas(modifier = modifier.height(12.dp)) {
+        val w = size.width
+        val h = size.height
+        val amplitude = h * 0.35f
+        val wavelength = 30f
+        val path = Path().apply {
+            moveTo(0f, h / 2)
+            var x = 0f
+            while (x < w) {
+                quadraticBezierTo(
+                    x + wavelength / 4, h / 2 - amplitude,
+                    x + wavelength / 2, h / 2,
+                )
+                quadraticBezierTo(
+                    x + wavelength * 3 / 4, h / 2 + amplitude,
+                    x + wavelength, h / 2,
+                )
+                x += wavelength
+            }
+        }
+        drawPath(path, color.copy(alpha = 0.55f), style = Stroke(width = 2f))
+    }
+}
+
+// ------------------------------------------------------------------
+// "+ Log" bottom sheet: weight, hydration, food -> Health Connect + Room.
+// ------------------------------------------------------------------
+
+private enum class LogMode { WEIGHT, HYDRATION, FOOD }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LogSheet(viewModel: MainViewModel, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var mode by remember { mutableStateOf<LogMode?>(null) }
+
+    fun saved(message: String, hcOk: Boolean) {
+        Toast.makeText(
+            context,
+            if (hcOk) message else "$message (could not sync to Health Connect)",
+            Toast.LENGTH_LONG,
+        ).show()
+        onDismiss()
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    text = (if (extreme) "⚠ " else "") +
-                        "${alert.title} · ${formatTime(alert.at)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (extreme) Color(0xFFB3261E)
-                    else MaterialTheme.colorScheme.onSecondaryContainer,
+                    when (mode) {
+                        null -> "Log"
+                        LogMode.WEIGHT -> "Log weight"
+                        LogMode.HYDRATION -> "Log hydration"
+                        LogMode.FOOD -> "Log food"
+                    },
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                if (mode != null) {
+                    IconButton(onClick = { mode = null }) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                } else {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                    }
+                }
+            }
+
+            when (mode) {
+                null -> {
+                    LogChoiceRow(Icons.Filled.MonitorWeight, "Weight", "Body weight in lb") {
+                        mode = LogMode.WEIGHT
+                    }
+                    LogChoiceRow(Icons.Filled.WaterDrop, "Hydration", "Water in ml") {
+                        mode = LogMode.HYDRATION
+                    }
+                    LogChoiceRow(Icons.Filled.Restaurant, "Food", "Calories and meal") {
+                        mode = LogMode.FOOD
+                    }
+                }
+                LogMode.WEIGHT -> {
+                    var text by remember { mutableStateOf("") }
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("Weight (lb)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    val lb = text.toDoubleOrNull()
+                    Button(
+                        onClick = { viewModel.logWeightLb(lb!!) { hcOk -> saved("Weight logged", hcOk) } },
+                        enabled = lb != null && lb > 0,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Save") }
+                }
+                LogMode.HYDRATION -> {
+                    var text by remember { mutableStateOf("") }
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("Water (ml)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("250", "500", "750").forEach { quick ->
+                            FilterChip(
+                                selected = text == quick,
+                                onClick = { text = quick },
+                                label = { Text("$quick ml") },
+                            )
+                        }
+                    }
+                    val ml = text.toDoubleOrNull()
+                    Button(
+                        onClick = { viewModel.logHydrationMl(ml!!) { hcOk -> saved("Hydration logged", hcOk) } },
+                        enabled = ml != null && ml > 0,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Save") }
+                }
+                LogMode.FOOD -> {
+                    var text by remember { mutableStateOf("") }
+                    var meal by remember { mutableStateOf(HealthConnectManager.FoodMeal.LUNCH) }
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("Calories (kcal)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            "Breakfast" to HealthConnectManager.FoodMeal.BREAKFAST,
+                            "Lunch" to HealthConnectManager.FoodMeal.LUNCH,
+                            "Dinner" to HealthConnectManager.FoodMeal.DINNER,
+                            "Snack" to HealthConnectManager.FoodMeal.SNACK,
+                        ).forEach { (name, type) ->
+                            FilterChip(
+                                selected = meal == type,
+                                onClick = { meal = type },
+                                label = { Text(name) },
+                            )
+                        }
+                    }
+                    val kcal = text.toDoubleOrNull()
+                    Button(
+                        onClick = {
+                            viewModel.logFoodKcal(kcal!!, meal) { hcOk -> saved("Food logged", hcOk) }
+                        },
+                        enabled = kcal != null && kcal > 0,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Save") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogChoiceRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TintedIcon(icon, contentDescription = null, size = 44.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Icon(
+                Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

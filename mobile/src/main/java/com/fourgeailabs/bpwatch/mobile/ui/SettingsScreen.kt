@@ -69,6 +69,7 @@ fun SettingsScreen(
     val points by viewModel.calibrationPoints.collectAsState()
     val profile by viewModel.userProfile.collectAsState()
     val monitoring by viewModel.monitoringConfig.collectAsState()
+    val recordHr by viewModel.recordHr.collectAsState()
 
     Column(
         modifier = Modifier
@@ -102,6 +103,8 @@ fun SettingsScreen(
             MonitoringCard(
                 config = monitoring,
                 onUpdate = { viewModel.updateMonitoring(it) },
+                recordHr = recordHr,
+                onRecordHrChange = { viewModel.setRecordHr(it) },
             )
         }
 
@@ -472,6 +475,8 @@ private fun SamsungHealthCard(
 private fun MonitoringCard(
     config: MonitoringConfig,
     onUpdate: ((MonitoringConfig) -> MonitoringConfig) -> Unit,
+    recordHr: Boolean,
+    onRecordHrChange: (Boolean) -> Unit,
 ) {
     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -498,6 +503,14 @@ private fun MonitoringCard(
                 subtitle = "Keeps the heart-rate sensor on all day. Uses noticeably more battery.",
                 checked = config.continuousHr,
                 onCheckedChange = { checked -> onUpdate { cfg -> cfg.copy(continuousHr = checked) } },
+            )
+
+            SwitchRow(
+                headline = "Record heart rate continuously",
+                subtitle = "Samples heart rate and stress every 10 minutes for your Trends " +
+                    "graphs. Off by default — it uses more battery.",
+                checked = recordHr,
+                onCheckedChange = onRecordHrChange,
             )
 
             MonitoringSubHeader("Heart-rate alert")

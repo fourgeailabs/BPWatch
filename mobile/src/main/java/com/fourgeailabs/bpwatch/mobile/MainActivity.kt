@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.AlertDialog
@@ -53,6 +54,7 @@ import com.fourgeailabs.bpwatch.mobile.ui.CalibrateScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HistoryScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HomeScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SettingsScreen
+import com.fourgeailabs.bpwatch.mobile.ui.TrendsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.WatchInstallScreen
 
 class MainActivity : ComponentActivity() {
@@ -268,6 +270,7 @@ private fun BpWatchPhoneApp(
 
     val tabs = listOf(
         "Home" to Icons.Filled.Home,
+        "Trends" to Icons.Filled.TrendingUp,
         "History" to Icons.Filled.History,
         "Watch" to Icons.Filled.Watch,
         "Settings" to Icons.Filled.Settings,
@@ -275,7 +278,7 @@ private fun BpWatchPhoneApp(
 
     Scaffold(
         topBar = {
-            if (selected == 4) {
+            if (selected == 5) {
                 MediumTopAppBar(
                     title = { Text("Calibrate") },
                     navigationIcon = {
@@ -304,11 +307,18 @@ private fun BpWatchPhoneApp(
     ) { padding ->
         Box(Modifier.padding(padding)) {
             when (selected) {
-                0 -> HomeScreen(viewModel, onOpenCalibrate = { selected = 4 })
-                1 -> HistoryScreen(viewModel)
-                2 -> WatchInstallScreen()
-                3 -> SettingsScreen(viewModel, onRequestHcPermissions)
-                4 -> CalibrateScreen(viewModel)
+                0 -> HomeScreen(
+                    viewModel,
+                    onOpenCalibrate = { selected = 5 },
+                    onOpenWatch = { selected = 3 },
+                    onOpenSettings = { selected = 4 },
+                    onOpenTrends = { selected = 1 },
+                )
+                1 -> TrendsScreen(viewModel, onRequestHcPermissions)
+                2 -> HistoryScreen(viewModel)
+                3 -> WatchInstallScreen()
+                4 -> SettingsScreen(viewModel, onRequestHcPermissions)
+                5 -> CalibrateScreen(viewModel)
             }
         }
     }

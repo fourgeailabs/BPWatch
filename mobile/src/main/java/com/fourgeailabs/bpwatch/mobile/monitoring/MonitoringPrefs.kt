@@ -57,6 +57,21 @@ class MonitoringPrefs(context: Context) {
     private val _config = MutableStateFlow(load())
     val config: StateFlow<MonitoringConfig> = _config.asStateFlow()
 
+    // ------------------------------------------------------------------
+    // Continuous HR + stress recording (v2.0, opt-in). Kept OUT of
+    // MonitoringConfig on purpose: it syncs over its own Data Layer path
+    // (PATH_HR_RECORD_SET) with the phone as source of truth, so a phone
+    // config rebroadcast can never clobber it. Default OFF — sampling the
+    // HR sensor every 10 minutes costs battery, and the user should opt in.
+    // ------------------------------------------------------------------
+    private val _recordHr = MutableStateFlow(prefs.getBoolean(KEY_RECORD_HR, false))
+    val recordHr: StateFlow<Boolean> = _recordHr.asStateFlow()
+
+    fun setRecordHr(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_RECORD_HR, enabled).apply()
+        _recordHr.value = enabled
+    }
+
     /**
      * True once the user has explicitly saved monitoring settings. The phone
      * only re-sends config to the watch on incoming readings after this —
@@ -122,6 +137,7 @@ class MonitoringPrefs(context: Context) {
         private const val PREFS = "bpwatch_monitoring"
         private const val KEY_CONFIGURED = "configured"
         private const val KEY_CONTINUOUS_HR = "continuous_hr"
+        private const val KEY_RECORD_HR = "record_hr_continuous"
         private const val KEY_HR_HIGH_ENABLED = "hr_high_enabled"
         private const val KEY_HR_HIGH_THRESHOLD = "hr_high_threshold"
         private const val KEY_BP_INTERVAL_MIN = "bp_interval_min"

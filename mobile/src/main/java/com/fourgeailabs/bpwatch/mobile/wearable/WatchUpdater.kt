@@ -90,10 +90,16 @@ object WatchUpdater {
     suspend fun sendApk(context: Context, bundled: BundledApk): Boolean {
         return try {
             val bytes = bundled.file.readBytes()
+            // SHA-256 so the watch can detect a corrupted Bluetooth transfer
+            // before it installs anything.
+            val sha256 = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(bytes)
+                .joinToString("") { "%02x".format(it) }
             val request = PutDataMapRequest.create(Link.PATH_APK_UPDATE).apply {
                 dataMap.putLong(Link.KEY_APK_VERSION_CODE, bundled.versionCode)
                 dataMap.putString(Link.KEY_APK_VERSION_NAME, bundled.versionName)
                 dataMap.putLong(Link.KEY_TIMESTAMP, System.currentTimeMillis())
+                dataMap.putString(Link.KEY_APK_SHA256, sha256)
                 dataMap.putAsset(Link.KEY_APK_ASSET, Asset.createFromBytes(bytes))
             }
             Wearable.getDataClient(context)

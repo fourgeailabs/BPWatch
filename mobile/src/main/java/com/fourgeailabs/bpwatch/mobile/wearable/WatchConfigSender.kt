@@ -46,6 +46,30 @@ object WatchConfigSender {
         }
     }
 
+    /**
+     * Sends the continuous-recording toggle (PATH_HR_RECORD_SET) to every
+     * connected watch. The phone is the source of truth — this goes out on
+     * every toggle change and on every full sync, so the watch always ends
+     * up matching the phone.
+     */
+    suspend fun sendRecordSet(context: Context, enabled: Boolean): Boolean {
+        return try {
+            val payload = DataMap().apply {
+                putBoolean(Link.KEY_HR_RECORD, enabled)
+            }.toByteArray()
+            val nodes = Wearable.getNodeClient(context).connectedNodes.await()
+            if (nodes.isEmpty()) return false
+            nodes.forEach { node ->
+                Wearable.getMessageClient(context)
+                    .sendMessage(node.id, Link.PATH_HR_RECORD_SET, payload)
+                    .await()
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun toPayload(config: MonitoringConfig): ByteArray =
         DataMap().apply {
             putInt(Link.KEY_CONFIG_V, 1)

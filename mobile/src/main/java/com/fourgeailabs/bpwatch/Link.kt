@@ -46,7 +46,10 @@ object Link {
     /**
      * Phone → watch: the APK itself, as a DataItem carrying KEY_APK_ASSET
      * plus KEY_APK_VERSION_CODE/KEY_APK_VERSION_NAME/KEY_TIMESTAMP (the
-     * timestamp forces the DataItem to count as changed every time).
+     * timestamp forces the DataItem to count as changed every time) and
+     * KEY_APK_SHA256 (hex SHA-256 of the APK bytes, so the watch can detect
+     * a corrupted Bluetooth transfer before installing; absent when sent by
+     * an older phone build, in which case the watch skips verification).
      */
     const val PATH_APK_UPDATE = "/bpwatch/apk_update"
     /**
@@ -59,8 +62,40 @@ object Link {
     const val KEY_APK_VERSION_NAME = "apk_version_name"
     const val KEY_APK_NEEDS_UPDATE = "apk_needs_update"
     const val KEY_APK_ASSET = "apk_asset"
+    const val KEY_APK_SHA256 = "apk_sha256"
     const val KEY_APK_RESULT = "apk_result"
     const val KEY_APK_MESSAGE = "apk_message"
+
+    // ------------------------------------------------------------------
+    // Continuous HR + stress recording (v2.0, opt-in). The phone owns the
+    // toggle; the watch samples every 10 minutes, persists samples locally
+    // (survives reboot), and pushes them to the phone in batches. The phone
+    // ACKs each batch so the watch can prune what arrived.
+    // ------------------------------------------------------------------
+    /**
+     * Phone → watch: enable/disable continuous recording. Payload:
+     * KEY_HR_RECORD (boolean). Sent on toggle change and on every full
+     * sync (peer connect), so the phone's choice always wins — a phone
+     * rebroadcast can never clobber it because the watch never changes it
+     * locally.
+     */
+    const val PATH_HR_RECORD_SET = "/bpwatch/hr_record_set"
+    /**
+     * Watch → phone: one batch of recorded samples. Payload:
+     * KEY_HIST_TS (long[]), KEY_HIST_BPM (float[]), KEY_HIST_STRESS (int[]),
+     * all the same length. The phone replies PATH_HISTORY_PUSH_ACK.
+     */
+    const val PATH_HISTORY_PUSH = "/bpwatch/history_push"
+    /**
+     * Phone → watch: ack for a PATH_HISTORY_PUSH batch. Payload:
+     * KEY_TIMESTAMP (long — the newest sample timestamp the phone stored).
+     * The watch deletes everything up to that timestamp.
+     */
+    const val PATH_HISTORY_PUSH_ACK = "/bpwatch/history_push_ack"
+    const val KEY_HR_RECORD = "hr_record"
+    const val KEY_HIST_TS = "hist_ts"
+    const val KEY_HIST_BPM = "hist_bpm"
+    const val KEY_HIST_STRESS = "hist_stress"
 
     // ------------------------------------------------------------------
     // Version reporting + settings sync (v1.15+). The phone is the source of

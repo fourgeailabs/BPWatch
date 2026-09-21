@@ -33,14 +33,61 @@ interface ReadingDao {
     suspend fun clearAll()
 }
 
-@Database(entities = [Reading::class], version = 2, exportSchema = false)
+@Dao
+interface HealthLogDao {
+    @Query("SELECT * FROM health_logs ORDER BY timestamp DESC")
+    fun observeAll(): Flow<List<HealthLog>>
+
+    @Insert
+    suspend fun insert(log: HealthLog): Long
+
+    @Query("DELETE FROM health_logs")
+    suspend fun clearAll()
+}
+
+@Database(
+    entities = [Reading::class, HealthLog::class, HrSample::class, StressSample::class],
+    version = 4,
+    exportSchema = false,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun readingDao(): ReadingDao
+    abstract fun healthLogDao(): HealthLogDao
+    abstract fun sampleDao(): SampleDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE readings ADD COLUMN stress INTEGER")
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS health_logs (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "timestamp INTEGER NOT NULL, " +
+                        "kind TEXT NOT NULL, " +
+                        "value REAL NOT NULL, " +
+                        "label TEXT NOT NULL)"
+                )
+            }
+        }
+
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS hr_samples (" +
+                        "timestamp INTEGER PRIMARY KEY NOT NULL, " +
+                        "bpm REAL NOT NULL, " +
+                        "source TEXT NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS stress_samples (" +
+                        "timestamp INTEGER PRIMARY KEY NOT NULL, " +
+                        "score INTEGER NOT NULL)"
+                )
             }
         }
 
@@ -54,7 +101,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "bpwatch.db",
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build().also { INSTANCE = it }
             }
     }

@@ -7,14 +7,30 @@ import android.net.Uri
 import android.os.Build
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.BloodPressureRecord
+import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.HydrationRecord
+import androidx.health.connect.client.records.MealType
+import androidx.health.connect.client.records.NutritionRecord
 import androidx.health.connect.client.records.OxygenSaturationRecord
+import androidx.health.connect.client.records.SleepSessionRecord
+import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
+import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import androidx.health.connect.client.units.Energy
+import androidx.health.connect.client.units.Mass
 import androidx.health.connect.client.units.Percentage
 import androidx.health.connect.client.units.Pressure
+import androidx.health.connect.client.units.Volume
+import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -64,6 +80,18 @@ class HealthConnectManager(private val context: Context) {
         HealthPermission.getReadPermission(OxygenSaturationRecord::class),
         HealthPermission.getReadPermission(BloodPressureRecord::class),
         HealthPermission.getWritePermission(BloodPressureRecord::class),
+        // Dashboard tiles (v2.0).
+        HealthPermission.getReadPermission(StepsRecord::class),
+        HealthPermission.getReadPermission(DistanceRecord::class),
+        HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
+        HealthPermission.getReadPermission(HeartRateRecord::class),
+        HealthPermission.getReadPermission(WeightRecord::class),
+        HealthPermission.getReadPermission(SleepSessionRecord::class),
+        HealthPermission.getReadPermission(HydrationRecord::class),
+        // "+ Log" sheet writes (v2.0).
+        HealthPermission.getWritePermission(WeightRecord::class),
+        HealthPermission.getWritePermission(HydrationRecord::class),
+        HealthPermission.getWritePermission(NutritionRecord::class),
     )
 
     /**
@@ -73,6 +101,22 @@ class HealthConnectManager(private val context: Context) {
     val readPermissions: Set<String> = setOf(
         HealthPermission.getReadPermission(OxygenSaturationRecord::class),
         HealthPermission.getReadPermission(BloodPressureRecord::class),
+    )
+
+    /**
+     * Every read the v2.0 dashboard needs. The tiles degrade gracefully when
+     * these aren't granted (they show "No data" plus a nudge to Settings),
+     * so a denied write grant never blanks the dashboard.
+     */
+    val dashboardReadPermissions: Set<String> = setOf(
+        HealthPermission.getReadPermission(OxygenSaturationRecord::class),
+        HealthPermission.getReadPermission(StepsRecord::class),
+        HealthPermission.getReadPermission(DistanceRecord::class),
+        HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
+        HealthPermission.getReadPermission(HeartRateRecord::class),
+        HealthPermission.getReadPermission(WeightRecord::class),
+        HealthPermission.getReadPermission(SleepSessionRecord::class),
+        HealthPermission.getReadPermission(HydrationRecord::class),
     )
 
     fun permissionContract() = PermissionController.createRequestPermissionResultContract()
@@ -87,6 +131,15 @@ class HealthConnectManager(private val context: Context) {
      */
     suspend fun hasReadPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().containsAll(readPermissions)
+
+    /** True when every read the v2.0 dashboard needs has been granted. */
+    suspend fun hasDashboardReads(): Boolean =
+        try {
+            client.permissionController.getGrantedPermissions()
+                .containsAll(dashboardReadPermissions)
+        } catch (_: Exception) {
+            false
+        }
 
     /**
      * Per-permission Android runtime status (granted/denied), for diagnostics.
@@ -115,6 +168,28 @@ class HealthConnectManager(private val context: Context) {
         Spo2Stats(count = records.size, newest = records.maxByOrNull { it.time }?.time)
     }
 
+    /**
+     * SpO2 samples in [start, end], for the Trends chart. Follows the same
+     * read path as [readLatestSpo2]; null on any failure (callers show the
+     * connect prompt instead of a dead chart).
+     */
+    suspend fun readSpo2Range(start: Instant, end: Instant): List<Spo2Sample>? =
+        withTimeoutOrNull(SPO2_QUERY_TIMEOUT_MS) {
+            client.readRecords(
+                ReadRecordsRequest(
+                    recordType = OxygenSaturationRecord::class,
+                    timeRangeFilter = TimeRangeFilter.between(start, end),
+                ),
+            ).records.mapNotNull { record ->
+                record.percentage?.let { pct ->
+                    Spo2Sample(
+                        timestamp = record.time.toEpochMilli(),
+                        spo2 = pct.value.toInt(),
+                    )
+                }
+            }
+        }
+
     private suspend fun spo2RecordsLast7Days(): List<OxygenSaturationRecord> {
         val end = Instant.now()
         val start = end.minus(7, ChronoUnit.DAYS)
@@ -137,6 +212,129 @@ class HealthConnectManager(private val context: Context) {
             measurementLocation = BloodPressureRecord.MEASUREMENT_LOCATION_LEFT_UPPER_ARM,
         )
         client.insertRecords(listOf(record))
+    }
+
+    /**
+     * Today's headline metrics for the v2.0 dashboard, or null on any
+     * failure. Aggregates are cheap single calls; the record reads are
+     * bounded to sensible windows. Never throws (callers wrap in timeout).
+     */
+    suspend fun readTodayMetrics(): TodayMetrics? = withTimeoutOrNull(SPO2_QUERY_TIMEOUT_MS) {
+        val zone = ZoneId.systemDefault()
+        val startOfDay = LocalDate.now(zone).atStartOfDay(zone).toInstant()
+        val now = Instant.now()
+        val dayFilter = TimeRangeFilter.between(startOfDay, now)
+
+        val agg = client.aggregate(
+            AggregateRequest(
+                metrics = setOf(
+                    StepsRecord.COUNT_TOTAL,
+                    DistanceRecord.DISTANCE_TOTAL,
+                    TotalCaloriesBurnedRecord.ENERGY_TOTAL,
+                    HydrationRecord.VOLUME_TOTAL,
+                ),
+                timeRangeFilter = dayFilter,
+            )
+        )
+
+        val heartRateBpm = client.readRecords(
+            ReadRecordsRequest(
+                recordType = HeartRateRecord::class,
+                timeRangeFilter = dayFilter,
+            )
+        ).records
+            .flatMap { it.samples }
+            .maxByOrNull { it.time }
+            ?.beatsPerMinute
+
+        val weightKg = client.readRecords(
+            ReadRecordsRequest(
+                recordType = WeightRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(
+                    now.minus(30, ChronoUnit.DAYS), now
+                ),
+            )
+        ).records
+            .maxByOrNull { it.time }
+            ?.weight?.let { HcUnitReaders.kilograms(it) }
+
+        // Last night's sleep: sessions ending in the last 36 hours.
+        val sleepCutoff = now.minus(36, ChronoUnit.HOURS)
+        val sleepMinutes = client.readRecords(
+            ReadRecordsRequest(
+                recordType = SleepSessionRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(sleepCutoff, now),
+            )
+        ).records
+            .filter { it.endTime.isAfter(sleepCutoff) }
+            .sumOf { Duration.between(it.startTime, it.endTime).toMinutes() }
+
+        TodayMetrics(
+            steps = agg.get(StepsRecord.COUNT_TOTAL),
+            distanceMeters = agg.get(DistanceRecord.DISTANCE_TOTAL)?.let { HcUnitReaders.meters(it) },
+            caloriesKcal = agg.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)?.let { HcUnitReaders.kilocalories(it) },
+            heartRateBpm = heartRateBpm,
+            weightKg = weightKg,
+            sleepHours = (sleepMinutes / 60.0).takeIf { sleepMinutes > 0 },
+            hydrationLiters = agg.get(HydrationRecord.VOLUME_TOTAL)?.let { HcUnitReaders.liters(it) },
+        )
+    }
+
+    /** Logs a weight entry to Health Connect. Throws on failure. */
+    suspend fun writeWeight(weightKg: Double, time: Instant) {
+        client.insertRecords(
+            listOf(
+                WeightRecord(
+                    time = time,
+                    zoneOffset = ZoneId.systemDefault().rules.getOffset(time),
+                    weight = Mass.kilograms(weightKg),
+                )
+            )
+        )
+    }
+
+    /** Logs a hydration entry to Health Connect. Throws on failure. */
+    suspend fun writeHydration(liters: Double, time: Instant) {
+        val zoneOffset = ZoneId.systemDefault().rules.getOffset(time)
+        client.insertRecords(
+            listOf(
+                HydrationRecord(
+                    startTime = time,
+                    startZoneOffset = zoneOffset,
+                    endTime = time,
+                    endZoneOffset = zoneOffset,
+                    volume = Volume.liters(liters),
+                )
+            )
+        )
+    }
+
+    /**
+     * Logs a food entry (calories + meal type) to Health Connect.
+     * Throws on failure.
+     */
+    suspend fun writeFood(kcal: Double, mealType: Int, time: Instant) {
+        val zoneOffset = ZoneId.systemDefault().rules.getOffset(time)
+        client.insertRecords(
+            listOf(
+                NutritionRecord(
+                    startTime = time,
+                    startZoneOffset = zoneOffset,
+                    endTime = time,
+                    endZoneOffset = zoneOffset,
+                    energy = Energy.kilocalories(kcal),
+                    mealType = mealType,
+                )
+            )
+        )
+    }
+
+    /** Re-exported so the UI layer doesn't need the HC import for meal types. */
+    object FoodMeal {
+        const val BREAKFAST = MealType.MEAL_TYPE_BREAKFAST
+        const val LUNCH = MealType.MEAL_TYPE_LUNCH
+        const val DINNER = MealType.MEAL_TYPE_DINNER
+        const val SNACK = MealType.MEAL_TYPE_SNACK
     }
 
     companion object {
@@ -258,3 +456,20 @@ class HealthConnectManager(private val context: Context) {
 
 /** SpO2 diagnostic: how many records Health Connect returned in the last 7 days. */
 data class Spo2Stats(val count: Int, val newest: java.time.Instant?)
+
+/** One SpO2 sample for the Trends chart. */
+data class Spo2Sample(val timestamp: Long, val spo2: Int)
+
+/**
+ * Headline metrics for the v2.0 dashboard. Every field is null when Health
+ * Connect has no data (or isn't readable); the tiles show "No data" then.
+ */
+data class TodayMetrics(
+    val steps: Long? = null,
+    val distanceMeters: Double? = null,
+    val caloriesKcal: Double? = null,
+    val heartRateBpm: Long? = null,
+    val weightKg: Double? = null,
+    val sleepHours: Double? = null,
+    val hydrationLiters: Double? = null,
+)

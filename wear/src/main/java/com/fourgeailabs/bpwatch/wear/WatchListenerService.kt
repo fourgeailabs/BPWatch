@@ -49,6 +49,16 @@ class WatchListenerService : WearableListenerService() {
                 DataLayer.requestConfig(this@WatchListenerService)
             } catch (_: Exception) {
             }
+            // Re-arm recording alarms (they die on reboot/update) and push
+            // any samples the phone hasn't ACKed yet.
+            try {
+                RecordScheduler.ensureScheduled(this@WatchListenerService)
+            } catch (_: Exception) {
+            }
+            try {
+                HistorySync.pushAll(this@WatchListenerService)
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -116,6 +126,12 @@ class WatchListenerService : WearableListenerService() {
             }
             Link.PATH_APK_BEGIN -> {
                 scope.launch { handleApkBegin(event) }
+            }
+            Link.PATH_HR_RECORD_SET -> {
+                scope.launch { handleHrRecordSet(event) }
+            }
+            Link.PATH_HISTORY_PUSH_ACK -> {
+                scope.launch { handleHistoryAck(event) }
             }
             Link.PATH_WATCH_INFO_REQUEST -> {
                 scope.launch {
@@ -205,7 +221,26 @@ class WatchListenerService : WearableListenerService() {
                 .inputStream.use { ins ->
                     outFile.outputStream().use { outs -> ins.copyTo(outs) }
                 }
-            Log.i(TAG, "APK saved (${outFile.length()} bytes), installing $offeredName")
+            Log.i(TAG, "APK saved (${outFile.length()} bytes), verifying $offeredName")
+            // Integrity check: a ~20 MB Bluetooth transfer can silently
+            // corrupt. Skip only when the phone didn't send a hash (older
+            // phone build).
+            val expectedSha = if (map.containsKey(Link.KEY_APK_SHA256)) {
+                map.getString(Link.KEY_APK_SHA256)
+            } else {
+                null
+            }
+            if (expectedSha != null) {
+                val actualSha = sha256Of(outFile)
+                if (!actualSha.equals(expectedSha, ignoreCase = true)) {
+                    Log.w(TAG, "APK SHA-256 mismatch: expected $expectedSha, got $actualSha")
+                    return result(
+                        "failed",
+                        "Update file was corrupted in transfer — try again.",
+                    )
+                }
+            }
+            Log.i(TAG, "APK verified, installing $offeredName")
             val ok = ApkSelfUpdater.installUpdate(this, outFile)
             if (ok) {
                 result("installing", "Confirm the update on your watch.")
@@ -220,5 +255,58 @@ class WatchListenerService : WearableListenerService() {
 
     companion object {
         private const val TAG = "WatchListenerService"
+
+        /** Hex SHA-256 of a file, streamed so a 20 MB APK is no problem. */
+        private fun sha256Of(file: File): String {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { ins ->
+                val buf = ByteArray(64 * 1024)
+                var n: Int
+                while (ins.read(buf).also { n = it } != -1) {
+                    digest.update(buf, 0, n)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Continuous HR + stress recording (v2.0).
+    // ------------------------------------------------------------------
+
+    /**
+     * The phone toggled continuous recording. The phone is the source of
+     * truth — the watch just applies it: persist the flag and arm/cancel
+     * the 10-minute sampling alarm.
+     */
+    private suspend fun handleHrRecordSet(event: MessageEvent) {
+        try {
+            val enabled = DataMap.fromByteArray(event.data)
+                .getBoolean(Link.KEY_HR_RECORD)
+            WatchSettings.setRecordHrEnabled(this, enabled)
+            if (enabled) {
+                RecordScheduler.schedule(this)
+            } else {
+                RecordScheduler.cancel(this)
+            }
+            Log.i(TAG, "Continuous recording ${if (enabled) "enabled" else "disabled"} by phone")
+        } catch (e: Exception) {
+            Log.w(TAG, "Bad HR_RECORD_SET payload", e)
+        }
+    }
+
+    /**
+     * The phone stored a history batch up to KEY_TIMESTAMP — prune those
+     * samples so the on-watch store doesn't grow forever.
+     */
+    private suspend fun handleHistoryAck(event: MessageEvent) {
+        try {
+            val maxTs = DataMap.fromByteArray(event.data).getLong(Link.KEY_TIMESTAMP)
+            if (maxTs > 0) {
+                SampleStore.deleteUpTo(this, maxTs)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Bad HISTORY_PUSH_ACK payload", e)
+        }
     }
 }

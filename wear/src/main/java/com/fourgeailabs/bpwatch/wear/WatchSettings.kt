@@ -21,6 +21,11 @@ object WatchSettings {
     private const val KEY_EST_TS = "est_ts"
     private const val KEY_CALIBRATED = "calibrated"
     private const val KEY_RESTING_HR = "resting_hr"
+    /**
+     * Continuous HR + stress recording (v2.0, opt-in). Owned by the phone —
+     * the watch only applies what arrives on PATH_HR_RECORD_SET.
+     */
+    private const val KEY_RECORD_HR = "record_hr_continuous"
     /** Fallback resting HR (bpm) until the phone sends the real baseline. */
     const val DEFAULT_RESTING_HR = 70f
 
@@ -73,6 +78,14 @@ object WatchSettings {
 
     fun getRestingHr(context: Context): Float =
         prefs(context).getFloat(KEY_RESTING_HR, DEFAULT_RESTING_HR)
+
+    /** Continuous recording toggle, pushed from the phone (default off). */
+    fun isRecordHrEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_RECORD_HR, false)
+
+    fun setRecordHrEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_RECORD_HR, enabled).apply()
+    }
 
     // ------------------------------------------------------------------
     // Monitoring & alerts config (pushed from the phone, v1.13+).

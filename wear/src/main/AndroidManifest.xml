@@ -80,6 +80,14 @@
         </receiver>
 
         <receiver
+            android:name="com.fourgeailabs.bpwatch.wear.RecordSampleReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.fourgeailabs.bpwatch.wear.RECORD_SAMPLE" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
             android:name="com.fourgeailabs.bpwatch.wear.BootReceiver"
             android:exported="false">
             <intent-filter>

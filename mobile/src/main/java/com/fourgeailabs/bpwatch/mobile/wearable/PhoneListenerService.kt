@@ -39,6 +39,7 @@ class PhoneListenerService : WearableListenerService() {
             Link.PATH_ALERT -> handleAlert(event)
             Link.PATH_APK_READY -> handleApkReady(event)
             Link.PATH_APK_RESULT -> handleApkResult(event)
+            Link.PATH_HISTORY_PUSH -> handleHistoryPush(event)
             Link.PATH_WATCH_INFO -> handleWatchInfo(event)
             Link.PATH_WATCH_CONFIG -> handleWatchConfig(event)
             Link.PATH_CONFIG_REQUEST -> handleConfigRequest(event)
@@ -108,6 +109,17 @@ class PhoneListenerService : WearableListenerService() {
                     monitoringPrefs.config.value,
                 )
             }
+        } catch (_: Exception) {
+        }
+
+        // Re-send the continuous-recording toggle too: the phone is the
+        // source of truth, so a reconnected/reinstalled watch always
+        // converges back to the phone's choice.
+        try {
+            WatchConfigSender.sendRecordSet(
+                applicationContext,
+                MonitoringPrefs(applicationContext).recordHr.value,
+            )
         } catch (_: Exception) {
         }
     }
@@ -291,9 +303,55 @@ class PhoneListenerService : WearableListenerService() {
         }
     }
 
+    /**
+     * The watch pushed a batch of recorded HR/stress samples
+     * (PATH_HISTORY_PUSH). Store them, then ACK the newest timestamp so
+     * the watch can prune what arrived. Inserts are idempotent (REPLACE),
+     * so a re-sent batch after a lost ACK is harmless.
+     */
+    private fun handleHistoryPush(event: MessageEvent) {
+        scope.launch {
+            try {
+                val map = DataMap.fromByteArray(event.data)
+                val timestamps = map.getLongArray(Link.KEY_HIST_TS) ?: return@launch
+                val bpms = map.getFloatArray(Link.KEY_HIST_BPM) ?: return@launch
+                val stresses = map.getIntegerArrayList(Link.KEY_HIST_STRESS) ?: return@launch
+                if (timestamps.isEmpty() ||
+                    timestamps.size != bpms.size ||
+                    timestamps.size != stresses.size
+                ) {
+                    return@launch
+                }
+                val repo = BpRepository.get(applicationContext)
+                repo.insertHistorySamples(
+                    hr = timestamps.indices.map { i ->
+                        com.fourgeailabs.bpwatch.mobile.data.HrSample(
+                            timestamp = timestamps[i],
+                            bpm = bpms[i],
+                            source = "watch",
+                        )
+                    },
+                    stress = timestamps.indices.map { i ->
+                        com.fourgeailabs.bpwatch.mobile.data.StressSample(
+                            timestamp = timestamps[i],
+                            score = stresses[i],
+                        )
+                    },
+                )
+                val ack = DataMap().apply {
+                    putLong(Link.KEY_TIMESTAMP, timestamps.max())
+                }.toByteArray()
+                Wearable.getMessageClient(applicationContext)
+                    .sendMessage(event.sourceNodeId, Link.PATH_HISTORY_PUSH_ACK, ack)
+                    .await()
+            } catch (_: Exception) {
+                // The watch keeps the batch and retries later.
+            }
+        }
+    }
+
     /** The watch reports what happened with the delivered APK. */
-    private fun handleApkResult(event: MessageEvent) {
-        try {
+    private fun handleApkResult(event: MessageEvent) {        try {
             val map = DataMap.fromByteArray(event.data)
             val message = map.getString(Link.KEY_APK_MESSAGE).orEmpty()
             when (map.getString(Link.KEY_APK_RESULT).orEmpty()) {

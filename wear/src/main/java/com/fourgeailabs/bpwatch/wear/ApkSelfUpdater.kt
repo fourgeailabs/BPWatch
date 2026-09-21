@@ -34,6 +34,9 @@ object ApkSelfUpdater {
             val params = PackageInstaller.SessionParams(
                 PackageInstaller.SessionParams.MODE_FULL_INSTALL,
             )
+            // Pin the session to our own package: a self-update must never
+            // be allowed to resolve to anything else.
+            params.setAppPackageName(context.packageName)
             val sessionId = installer.createSession(params)
             installer.openSession(sessionId).use { session ->
                 apkFile.inputStream().use { ins ->
