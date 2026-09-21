@@ -12,6 +12,8 @@ import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationPoint
 import com.fourgeailabs.bpwatch.mobile.data.HealthLog
 import com.fourgeailabs.bpwatch.mobile.data.Reading
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
+import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendMetric
+import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendPoint
 import com.fourgeailabs.bpwatch.mobile.healthconnect.TodayMetrics
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringConfig
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringPrefs
@@ -422,6 +424,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun observeStressRange(start: Long, end: Long) =
         repo.sampleDao.observeStressRange(start, end)
+
+    /**
+     * True when Health Connect is available and every read the v2.1 Trends
+     * graphs need is granted. Uses the dashboard read set — no new
+     * permissions were added for the new metrics.
+     */
+    suspend fun isHcTrendsAvailable(): Boolean = try {
+        hc.isAvailable && hc.hasDashboardReads()
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * Bucketed Health Connect history for a Trends metric. Empty when Health
+     * Connect isn't usable — never throws.
+     */
+    suspend fun loadHcTrendRange(
+        metric: HcTrendMetric,
+        start: java.time.Instant,
+        end: java.time.Instant,
+        bucketHours: Long,
+    ): List<HcTrendPoint> {
+        return try {
+            if (!isHcTrendsAvailable()) emptyList()
+            else hc.readHcTrend(metric, start, end, bucketHours) ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
 
     private fun timeAgo(instant: java.time.Instant): String {
         val mins = java.time.Duration.between(instant, java.time.Instant.now())

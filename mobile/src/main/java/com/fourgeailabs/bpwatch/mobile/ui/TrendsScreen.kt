@@ -44,20 +44,50 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
+import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendMetric
+import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendPoint
 import com.fourgeailabs.bpwatch.mobile.healthconnect.Spo2Sample
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private enum class TrendMetric(val label: String) {
+/**
+ * Trends metrics. The first four are the v2.0 set; the rest (v2.1) give
+ * every home tile a landing spot. Public so HomeScreen can deep-link here.
+ */
+enum class TrendMetric(val label: String) {
     HEART_RATE("Heart rate"),
     STRESS("Stress"),
     BLOOD_PRESSURE("Blood pressure"),
     SPO2("Blood oxygen"),
+    STEPS("Steps"),
+    DISTANCE("Distance"),
+    CALORIES("Calories"),
+    WEIGHT("Weight"),
+    SLEEP("Sleep"),
+    HYDRATION("Hydration"),
+}
+
+/** True for the Health Connect-backed metrics (everything after SpO2). */
+private fun TrendMetric.isHcTrend(): Boolean = when (this) {
+    TrendMetric.STEPS, TrendMetric.DISTANCE, TrendMetric.CALORIES,
+    TrendMetric.WEIGHT, TrendMetric.SLEEP, TrendMetric.HYDRATION -> true
+    else -> false
+}
+
+private fun TrendMetric.toHcTrendMetric(): HcTrendMetric = when (this) {
+    TrendMetric.STEPS -> HcTrendMetric.STEPS
+    TrendMetric.DISTANCE -> HcTrendMetric.DISTANCE
+    TrendMetric.CALORIES -> HcTrendMetric.CALORIES
+    TrendMetric.WEIGHT -> HcTrendMetric.WEIGHT
+    TrendMetric.SLEEP -> HcTrendMetric.SLEEP
+    TrendMetric.HYDRATION -> HcTrendMetric.HYDRATION
+    else -> error("not a Health Connect trend metric: $this")
 }
 
 private enum class TrendRange(val label: String, val millis: Long) {
+    HOUR("Hour", 24L * 3600_000L),
     DAY("Day", 24L * 3600_000L),
     WEEK("Week", 7L * 24L * 3600_000L),
     MONTH("Month", 30L * 24L * 3600_000L),
@@ -76,6 +106,9 @@ private data class ChartSeries(
 /**
  * v2.0 Trends: history graphs for heart rate, stress, blood pressure and
  * SpO2, with a metric switcher, a range switcher, and min/max/avg summary.
+ * v2.1: every home tile deep-links here (initialMetric), an Hour range
+ * shows hourly buckets over the last 24h, and steps/distance/calories/
+ * weight/sleep/hydration metrics pull bucketed history from Health Connect.
  * Charts are hand-rolled on Compose Canvas — no chart dependencies.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,9 +116,19 @@ private data class ChartSeries(
 fun TrendsScreen(
     viewModel: MainViewModel,
     onRequestHcPermissions: (Set<String>) -> Unit,
+    initialMetric: TrendMetric? = null,
+    onInitialMetricConsumed: () -> Unit = {},
 ) {
     var metric by remember { mutableStateOf(TrendMetric.HEART_RATE) }
     var range by remember { mutableStateOf(TrendRange.WEEK) }
+
+    // A home tile deep-link: preselect the metric, then clear the request.
+    LaunchedEffect(initialMetric) {
+        if (initialMetric != null) {
+            metric = initialMetric
+            onInitialMetricConsumed()
+        }
+    }
 
     val now = remember(range) { System.currentTimeMillis() }
     val start = now - range.millis
@@ -101,6 +144,8 @@ fun TrendsScreen(
     var spo2 by remember { mutableStateOf<List<Spo2Sample>>(emptyList()) }
     var hcAvailable by remember { mutableStateOf(false) }
     var spo2Loading by remember { mutableStateOf(false) }
+    var hcTrend by remember { mutableStateOf<List<HcTrendPoint>>(emptyList()) }
+    var hcTrendLoading by remember { mutableStateOf(false) }
     LaunchedEffect(range, metric) {
         if (metric == TrendMetric.SPO2) {
             spo2Loading = true
@@ -110,17 +155,34 @@ fun TrendsScreen(
                 Instant.ofEpochMilli(now),
             )
             spo2Loading = false
+        } else if (metric.isHcTrend()) {
+            hcTrendLoading = true
+            hcAvailable = viewModel.isHcTrendsAvailable()
+            hcTrend = viewModel.loadHcTrendRange(
+                metric.toHcTrendMetric(),
+                Instant.ofEpochMilli(start),
+                Instant.ofEpochMilli(now),
+                // Hourly buckets for the short ranges, daily beyond that.
+                bucketHours = if (range == TrendRange.HOUR || range == TrendRange.DAY) 1L else 24L,
+            )
+            hcTrendLoading = false
         }
     }
 
-    val series: List<ChartSeries> = remember(metric, hrSamples, stressSamples, readings, spo2, start, now) {
+    val series: List<ChartSeries> = remember(metric, range, hrSamples, stressSamples, readings, spo2, hcTrend, start, now) {
+        // Hour range: dense watch samples collapse to hourly averages;
+        // sparse metrics just show their sparse points.
+        val hrPoints = hrSamples.map { ChartPoint(it.timestamp, it.bpm) }
+            .let { if (range == TrendRange.HOUR) bucketHourly(it, start) else it }
+        val stressPoints = stressSamples.map { ChartPoint(it.timestamp, it.score.toFloat()) }
+            .let { if (range == TrendRange.HOUR) bucketHourly(it, start) else it }
         when (metric) {
             TrendMetric.HEART_RATE -> listOf(
                 ChartSeries(
                     label = "Heart rate",
                     color = Color(0xFFD93025),
                     unit = "bpm",
-                    points = hrSamples.map { ChartPoint(it.timestamp, it.bpm) },
+                    points = hrPoints,
                 )
             )
             TrendMetric.STRESS -> listOf(
@@ -128,7 +190,7 @@ fun TrendsScreen(
                     label = "Stress",
                     color = Color(0xFF9334E6),
                     unit = "",
-                    points = stressSamples.map { ChartPoint(it.timestamp, it.score.toFloat()) },
+                    points = stressPoints,
                 )
             )
             TrendMetric.BLOOD_PRESSURE -> {
@@ -164,6 +226,12 @@ fun TrendsScreen(
                     points = spo2.map { ChartPoint(it.timestamp, it.spo2.toFloat()) },
                 )
             )
+            TrendMetric.STEPS -> hcSeries("Steps", Color(0xFF1A73E8), "", hcTrend)
+            TrendMetric.DISTANCE -> hcSeries("Distance", Color(0xFF9334E6), "mi", hcTrend)
+            TrendMetric.CALORIES -> hcSeries("Calories", Color(0xFFEA8600), "kcal", hcTrend)
+            TrendMetric.WEIGHT -> hcSeries("Weight", Color(0xFF0B8043), "lb", hcTrend)
+            TrendMetric.SLEEP -> hcSeries("Sleep", Color(0xFF3949AB), "h", hcTrend)
+            TrendMetric.HYDRATION -> hcSeries("Hydration", Color(0xFF039BE5), "L", hcTrend)
         }
     }
 
@@ -208,8 +276,9 @@ fun TrendsScreen(
         }
 
         val hasData = series.any { it.points.isNotEmpty() }
+        val hcLoading = spo2Loading || hcTrendLoading
         when {
-            metric == TrendMetric.SPO2 && !hcAvailable && !spo2Loading -> {
+            (metric == TrendMetric.SPO2 || metric.isHcTrend()) && !hcAvailable && !hcLoading -> {
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -221,7 +290,10 @@ fun TrendsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            "Blood oxygen history lives in Health Connect",
+                            when (metric) {
+                                TrendMetric.SPO2 -> "Blood oxygen history lives in Health Connect"
+                                else -> "${metric.label} history lives in Health Connect"
+                            },
                             style = MaterialTheme.typography.titleSmall,
                         )
                         Text(
@@ -229,7 +301,12 @@ fun TrendsScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Button(onClick = { onRequestHcPermissions(viewModel.hcReadPermissions) }) {
+                        Button(onClick = {
+                            onRequestHcPermissions(
+                                if (metric == TrendMetric.SPO2) viewModel.hcReadPermissions
+                                else viewModel.hcPermissions
+                            )
+                        }) {
                             Text("Connect Health Connect")
                         }
                     }
@@ -306,6 +383,14 @@ fun TrendsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (metric.isHcTrend()) {
+            Text(
+                "Pulled from Health Connect. Samsung Health can share these " +
+                    "if sync is switched on there.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(Modifier.height(4.dp))
     }
 }
@@ -343,7 +428,7 @@ private fun TrendChart(
     val zone = remember { ZoneId.systemDefault() }
     val xFmt = remember(range) {
         when (range) {
-            TrendRange.DAY -> DateTimeFormatter.ofPattern("ha")
+            TrendRange.HOUR, TrendRange.DAY -> DateTimeFormatter.ofPattern("ha")
             TrendRange.WEEK -> DateTimeFormatter.ofPattern("EEE")
             TrendRange.MONTH -> DateTimeFormatter.ofPattern("d MMM")
             TrendRange.YEAR -> DateTimeFormatter.ofPattern("MMM")
@@ -465,6 +550,34 @@ private fun TrendChart(
             }
         }
     }
+}
+
+/** Wraps Health Connect trend points in a ChartSeries. */
+private fun hcSeries(
+    label: String,
+    color: Color,
+    unit: String,
+    points: List<HcTrendPoint>,
+): List<ChartSeries> = listOf(
+    ChartSeries(
+        label = label,
+        color = color,
+        unit = unit,
+        points = points.map { ChartPoint(it.timestamp, it.value) },
+    )
+)
+
+/** Averages points into hour buckets anchored at [start] (Hour range). */
+private fun bucketHourly(points: List<ChartPoint>, start: Long): List<ChartPoint> {
+    val hourMs = 3600_000L
+    return points.groupBy { ((it.x - start).coerceAtLeast(0) / hourMs) }
+        .map { (idx, ps) ->
+            ChartPoint(
+                x = start + idx * hourMs,
+                y = ps.map { it.y }.average().toFloat(),
+            )
+        }
+        .sortedBy { it.x }
 }
 
 /** Bucket-average downsampling so dense ranges stay smooth. */

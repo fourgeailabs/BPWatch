@@ -97,7 +97,7 @@ fun HomeScreen(
     onOpenCalibrate: () -> Unit,
     onOpenWatch: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenTrends: () -> Unit,
+    onOpenTrends: (TrendMetric) -> Unit,
 ) {
     val readings by viewModel.readings.collectAsState()
     val dashboard by viewModel.dashboard.collectAsState()
@@ -127,9 +127,12 @@ fun HomeScreen(
         )
 
         // --- BP hero: deep navy card, crimson heart, white ECG line identity.
+        // Tapping jumps to the blood-pressure trend.
         Card(
             colors = CardDefaults.cardColors(containerColor = Navy),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenTrends(TrendMetric.BLOOD_PRESSURE) },
         ) {
             Row(
                 modifier = Modifier.padding(18.dp),
@@ -217,7 +220,7 @@ fun HomeScreen(
         }
 
         // --- Metric grid: real data only, nothing invented.
-        MetricGrid(dashboard = dashboard)
+        MetricGrid(dashboard = dashboard, onOpenTrends = onOpenTrends)
 
         // --- Slim calibrate entry.
         ElevatedCard(
@@ -251,7 +254,7 @@ fun HomeScreen(
         ElevatedCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onOpenTrends),
+                .clickable { onOpenTrends(TrendMetric.HEART_RATE) },
         ) {
             Row(
                 modifier = Modifier.padding(14.dp),
@@ -262,7 +265,7 @@ fun HomeScreen(
                 Column(Modifier.weight(1f)) {
                     Text("Trends", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Heart rate, stress, blood pressure and SpO2 graphs",
+                        "History graphs for every tile, from hours to years",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -305,9 +308,12 @@ fun HomeScreen(
     }
 }
 
-/** Two-column grid of health tiles. */
+/** Two-column grid of health tiles. Tapping a tile opens its Trends graph. */
 @Composable
-private fun MetricGrid(dashboard: DashboardMetrics) {
+private fun MetricGrid(
+    dashboard: DashboardMetrics,
+    onOpenTrends: (TrendMetric) -> Unit,
+) {
     val liveHr by WatchLiveState.liveHr.collectAsState()
     val liveHrAt by WatchLiveState.liveHrAt.collectAsState()
     val liveFresh = liveHr != null && liveHrAt > 0L && WatchLiveState.isLiveHrFresh()
@@ -333,27 +339,49 @@ private fun MetricGrid(dashboard: DashboardMetrics) {
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            HealthTile(Icons.Filled.DirectionsWalk, "Steps", stepsText, Color(0xFF1A73E8))
-            HealthTile(Icons.Filled.Place, "Distance", distanceText, Color(0xFF9334E6))
+            HealthTile(Icons.Filled.DirectionsWalk, "Steps", stepsText, Color(0xFF1A73E8)) {
+                onOpenTrends(TrendMetric.STEPS)
+            }
+            HealthTile(Icons.Filled.Place, "Distance", distanceText, Color(0xFF9334E6)) {
+                onOpenTrends(TrendMetric.DISTANCE)
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            HealthTile(Icons.Filled.LocalFireDepartment, "Calories", caloriesText, Color(0xFFEA8600))
-            HealthTile(Icons.Filled.Favorite, "Heart rate", hrText, Color(0xFFD93025), live = liveFresh)
+            HealthTile(Icons.Filled.LocalFireDepartment, "Calories", caloriesText, Color(0xFFEA8600)) {
+                onOpenTrends(TrendMetric.CALORIES)
+            }
+            HealthTile(Icons.Filled.Favorite, "Heart rate", hrText, Color(0xFFD93025), live = liveFresh) {
+                onOpenTrends(TrendMetric.HEART_RATE)
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            HealthTile(Icons.Filled.MonitorWeight, "Weight", weightText, Color(0xFF0B8043))
-            HealthTile(Icons.Filled.Bedtime, "Sleep", sleepText, Color(0xFF3949AB))
+            HealthTile(Icons.Filled.MonitorWeight, "Weight", weightText, Color(0xFF0B8043)) {
+                onOpenTrends(TrendMetric.WEIGHT)
+            }
+            HealthTile(Icons.Filled.Bedtime, "Sleep", sleepText, Color(0xFF3949AB)) {
+                onOpenTrends(TrendMetric.SLEEP)
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            HealthTile(Icons.Filled.WaterDrop, "Hydration", hydrationText, Color(0xFF039BE5))
-            HealthTile(Icons.Filled.Air, "Blood oxygen", spo2Text, Color(0xFF0B8043))
+            HealthTile(Icons.Filled.WaterDrop, "Hydration", hydrationText, Color(0xFF039BE5)) {
+                onOpenTrends(TrendMetric.HYDRATION)
+            }
+            HealthTile(Icons.Filled.Air, "Blood oxygen", spo2Text, Color(0xFF0B8043)) {
+                onOpenTrends(TrendMetric.SPO2)
+            }
         }
     }
 }
 
 /**
  * One metric tile. Tiles with data get a tinted card; empty ones sit back
- * on surfaceContainerHigh. Nothing is ever faked.
+ * on surfaceContainerHigh. Nothing is ever faked. Tapping opens the tile's
+ * Trends graph.
+ *
+ * Contrast note: a filled tile uses tertiaryContainer, so its text must use
+ * onTertiaryContainer — the old onSurface/onSurfaceVariant pairing went
+ * unreadable under dynamic-colour dark themes where tertiaryContainer
+ * renders light.
  */
 @Composable
 private fun RowScope.HealthTile(
@@ -362,10 +390,13 @@ private fun RowScope.HealthTile(
     value: String?,
     accent: Color,
     live: Boolean = false,
+    onClick: () -> Unit,
 ) {
     val hasData = value != null
     ElevatedCard(
-        modifier = Modifier.weight(1f),
+        modifier = Modifier
+            .weight(1f)
+            .clickable(onClick = onClick),
         colors = CardDefaults.elevatedCardColors(
             containerColor = if (hasData) MaterialTheme.colorScheme.tertiaryContainer
             else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -394,12 +425,13 @@ private fun RowScope.HealthTile(
             Text(
                 label,
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (hasData) MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 value ?: "No data",
                 style = MaterialTheme.typography.titleLarge,
-                color = if (hasData) MaterialTheme.colorScheme.onSurface
+                color = if (hasData) MaterialTheme.colorScheme.onTertiaryContainer
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

@@ -54,6 +54,7 @@ import com.fourgeailabs.bpwatch.mobile.ui.CalibrateScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HistoryScreen
 import com.fourgeailabs.bpwatch.mobile.ui.HomeScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SettingsScreen
+import com.fourgeailabs.bpwatch.mobile.ui.TrendMetric
 import com.fourgeailabs.bpwatch.mobile.ui.TrendsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.WatchInstallScreen
 
@@ -193,6 +194,10 @@ private fun BpWatchPhoneApp(
     val context = LocalContext.current
     // 0..3 = bottom tabs, 4 = Calibrate page (opened from Home, not a tab).
     var selected by remember { mutableIntStateOf(0) }
+    // Deep-link target for the Trends tab: a home tile sets this, then the
+    // tab switch opens Trends with the metric preselected (Week range is
+    // the default). TrendsScreen clears it once consumed.
+    var trendsInitial by remember { mutableStateOf<TrendMetric?>(null) }
     var showCrash by remember(crashReport) { mutableStateOf(crashReport != null) }
 
     if (showCrash && crashReport != null) {
@@ -312,9 +317,14 @@ private fun BpWatchPhoneApp(
                     onOpenCalibrate = { selected = 5 },
                     onOpenWatch = { selected = 3 },
                     onOpenSettings = { selected = 4 },
-                    onOpenTrends = { selected = 1 },
+                    onOpenTrends = { metric -> trendsInitial = metric; selected = 1 },
                 )
-                1 -> TrendsScreen(viewModel, onRequestHcPermissions)
+                1 -> TrendsScreen(
+                    viewModel,
+                    onRequestHcPermissions,
+                    initialMetric = trendsInitial,
+                    onInitialMetricConsumed = { trendsInitial = null },
+                )
                 2 -> HistoryScreen(viewModel)
                 3 -> WatchInstallScreen()
                 4 -> SettingsScreen(viewModel, onRequestHcPermissions)

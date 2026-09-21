@@ -7,6 +7,9 @@ import android.net.Uri
 import android.os.Build
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.aggregate.AggregateMetric
+import androidx.health.connect.client.aggregate.AggregationResult
+import androidx.health.connect.client.request.AggregateGroupByDurationRequest
 import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.BloodPressureRecord
@@ -280,6 +283,110 @@ class HealthConnectManager(private val context: Context) {
         )
     }
 
+    /**
+     * Bucketed history for a Trends metric over [start, end], or null on any
+     * failure. Steps, distance, calories and hydration are sums per bucket;
+     * weight is the latest reading per bucket; sleep is total hours per
+     * bucket (each session attributed to the bucket its end falls in).
+     * Empty buckets are dropped, so sparse metrics show sparse points.
+     * Callers pass 1-hour buckets for the Hour/Day ranges, 24-hour buckets
+     * for Week/Month/Year. Never throws (callers wrap in a timeout).
+     */
+    suspend fun readHcTrend(
+        metric: HcTrendMetric,
+        start: Instant,
+        end: Instant,
+        bucketHours: Long,
+    ): List<HcTrendPoint>? = withTimeoutOrNull(HC_TREND_TIMEOUT_MS) {
+        val filter = TimeRangeFilter.between(start, end)
+        val slicer = Duration.ofHours(bucketHours)
+        when (metric) {
+            HcTrendMetric.STEPS -> aggregateTrend(
+                setOf(StepsRecord.COUNT_TOTAL), filter, slicer,
+            ) { agg -> agg.get(StepsRecord.COUNT_TOTAL)?.toFloat() }
+            HcTrendMetric.DISTANCE -> aggregateTrend(
+                setOf(DistanceRecord.DISTANCE_TOTAL), filter, slicer,
+            ) { agg ->
+                agg.get(DistanceRecord.DISTANCE_TOTAL)
+                    ?.let { (HcUnitReaders.meters(it) / 1609.344).toFloat() }
+            }
+            HcTrendMetric.CALORIES -> aggregateTrend(
+                setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL), filter, slicer,
+            ) { agg ->
+                agg.get(TotalCaloriesBurnedRecord.ENERGY_TOTAL)
+                    ?.let { HcUnitReaders.kilocalories(it).toFloat() }
+            }
+            HcTrendMetric.HYDRATION -> aggregateTrend(
+                setOf(HydrationRecord.VOLUME_TOTAL), filter, slicer,
+            ) { agg ->
+                agg.get(HydrationRecord.VOLUME_TOTAL)
+                    ?.let { HcUnitReaders.liters(it).toFloat() }
+            }
+            HcTrendMetric.WEIGHT -> {
+                val records = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = WeightRecord::class,
+                        timeRangeFilter = filter,
+                    )
+                ).records
+                records.groupBy { bucketStart(it.time, start, slicer) }
+                    .mapNotNull { (bucket, rs) ->
+                        rs.maxByOrNull { it.time }?.weight?.let { w ->
+                            HcTrendPoint(
+                                bucket.toEpochMilli(),
+                                (HcUnitReaders.kilograms(w) * 2.20462).toFloat(),
+                            )
+                        }
+                    }
+                    .sortedBy { it.timestamp }
+            }
+            HcTrendMetric.SLEEP -> {
+                val records = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = SleepSessionRecord::class,
+                        timeRangeFilter = filter,
+                    )
+                ).records
+                records.groupBy { bucketStart(it.endTime, start, slicer) }
+                    .map { (bucket, rs) ->
+                        val hours =
+                            rs.sumOf { Duration.between(it.startTime, it.endTime).toMinutes() } / 60f
+                        HcTrendPoint(bucket.toEpochMilli(), hours)
+                    }
+                    .sortedBy { it.timestamp }
+            }
+        }
+    }
+
+    /**
+     * One aggregateGroupByDuration call, mapped to chart points. Buckets with
+     * no data come back with an empty result and are dropped.
+     */
+    private suspend fun aggregateTrend(
+        metrics: Set<AggregateMetric<*>>,
+        filter: TimeRangeFilter,
+        slicer: Duration,
+        extract: (AggregationResult) -> Float?,
+    ): List<HcTrendPoint> =
+        client.aggregateGroupByDuration(
+            AggregateGroupByDurationRequest(
+                metrics = metrics,
+                timeRangeFilter = filter,
+                timeRangeSlicer = slicer,
+            )
+        ).mapNotNull { group ->
+            extract(group.result)?.let { v ->
+                HcTrendPoint(group.startTime.toEpochMilli(), v)
+            }
+        }
+
+    /** Start of the [slicer]-sized bucket containing [t], anchored at [rangeStart]. */
+    private fun bucketStart(t: Instant, rangeStart: Instant, slicer: Duration): Instant {
+        val idx = (Duration.between(rangeStart, t).toMillis() / slicer.toMillis())
+            .coerceAtLeast(0)
+        return rangeStart.plus(slicer.multipliedBy(idx))
+    }
+
     /** Logs a weight entry to Health Connect. Throws on failure. */
     suspend fun writeWeight(weightKg: Double, time: Instant) {
         client.insertRecords(
@@ -343,6 +450,9 @@ class HealthConnectManager(private val context: Context) {
 
         /** SpO2 queries against Samsung Health can hang — never wait forever. */
         private const val SPO2_QUERY_TIMEOUT_MS = 15_000L
+
+        /** Trend range queries can span a year of buckets — allow longer. */
+        private const val HC_TREND_TIMEOUT_MS = 30_000L
 
         /** True when the Health Connect app / system component can handle intents. */
         fun isHealthConnectInstalled(context: Context): Boolean {
@@ -459,6 +569,12 @@ data class Spo2Stats(val count: Int, val newest: java.time.Instant?)
 
 /** One SpO2 sample for the Trends chart. */
 data class Spo2Sample(val timestamp: Long, val spo2: Int)
+
+/** Health Connect-backed Trends metrics (v2.1): every home tile's landing spot. */
+enum class HcTrendMetric { STEPS, DISTANCE, CALORIES, WEIGHT, SLEEP, HYDRATION }
+
+/** One bucketed point of a Health Connect Trends metric. */
+data class HcTrendPoint(val timestamp: Long, val value: Float)
 
 /**
  * Headline metrics for the v2.0 dashboard. Every field is null when Health
