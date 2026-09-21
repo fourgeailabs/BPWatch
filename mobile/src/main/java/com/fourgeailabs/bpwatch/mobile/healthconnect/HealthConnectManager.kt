@@ -476,6 +476,74 @@ class HealthConnectManager(private val context: Context) {
             .coerceAtLeast(0L)
     }
 
+    /**
+     * v2.3.2 sleep diagnostics: answers "why is sleep not populating?" with
+     * facts instead of guesses — the grant state Health Connect itself
+     * reports, the raw sessions it actually holds (with stage counts and
+     * the package that wrote each one), and any exception from the read.
+     * Never throws; the error string carries failures to the UI.
+     */
+    suspend fun diagnoseSleep(): SleepDiagnosis {
+        val now = Instant.now()
+        return try {
+            withTimeoutOrNull(HC_QUERY_TIMEOUT_MS) {
+                val readSleep =
+                    HealthPermission.getReadPermission(SleepSessionRecord::class)
+                val granted = grantedPermissions()
+                val sessions36h = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = SleepSessionRecord::class,
+                        timeRangeFilter = TimeRangeFilter.between(
+                            now.minus(36, ChronoUnit.HOURS), now
+                        ),
+                    )
+                ).records
+                    .filter { it.endTime.isAfter(now.minus(36, ChronoUnit.HOURS)) }
+                    .map { s ->
+                        SleepSessionInfo(
+                            start = s.startTime,
+                            end = s.endTime,
+                            minutesCounted = sleepMinutes(s),
+                            stageCount = s.stages.size,
+                            originPackage = s.metadata.dataOrigin.packageName,
+                        )
+                    }
+                    .sortedBy { it.end }
+                val sessions7d = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = SleepSessionRecord::class,
+                        timeRangeFilter = TimeRangeFilter.between(
+                            now.minus(7, ChronoUnit.DAYS), now
+                        ),
+                    )
+                ).records.size
+                SleepDiagnosis(
+                    sdkStatus = sdkStatusText(),
+                    readSleepGranted = readSleep in granted,
+                    sessions36h = sessions36h,
+                    sessions7d = sessions7d,
+                    error = null,
+                )
+            } ?: SleepDiagnosis(
+                sdkStatus = sdkStatusText(),
+                readSleepGranted = false,
+                sessions36h = emptyList(),
+                sessions7d = 0,
+                error = "Health Connect query timed out.",
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            SleepDiagnosis(
+                sdkStatus = sdkStatusText(),
+                readSleepGranted = false,
+                sessions36h = emptyList(),
+                sessions7d = 0,
+                error = "${e.javaClass.simpleName}: ${e.message}",
+            )
+        }
+    }
+
     /** Logs a weight entry to Health Connect. Throws on failure. */
     suspend fun writeWeight(weightKg: Double, time: Instant) {
         client.insertRecords(
@@ -670,6 +738,30 @@ enum class HcTrendMetric {
 
 /** One bucketed point of a Health Connect Trends metric. */
 data class HcTrendPoint(val timestamp: Long, val value: Float)
+
+/**
+ * v2.3.2: one raw sleep session as Health Connect actually holds it — what
+ * the sleep diagnostic shows so "no data" stops being a mystery.
+ */
+data class SleepSessionInfo(
+    val start: Instant,
+    val end: Instant,
+    /** Minutes counted toward sleep by [HealthConnectManager.sleepMinutes]. */
+    val minutesCounted: Long,
+    val stageCount: Int,
+    /** Package that wrote the session (e.g. Samsung Health), if reported. */
+    val originPackage: String?,
+)
+
+/** v2.3.2: the full answer to "why is my sleep not populating?" */
+data class SleepDiagnosis(
+    val sdkStatus: String,
+    val readSleepGranted: Boolean,
+    val sessions36h: List<SleepSessionInfo>,
+    val sessions7d: Int,
+    /** Non-null when the diagnostic read itself failed. */
+    val error: String?,
+)
 
 /**
  * Headline metrics for the v2.0 dashboard. Every field is null when Health

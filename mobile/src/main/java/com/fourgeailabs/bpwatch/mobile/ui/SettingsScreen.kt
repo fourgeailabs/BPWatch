@@ -61,6 +61,7 @@ import com.fourgeailabs.bpwatch.BuildConfig
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationEngine
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
+import com.fourgeailabs.bpwatch.mobile.healthconnect.SleepDiagnosis
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringConfig
 import com.fourgeailabs.bpwatch.mobile.profile.UserProfile
 import com.fourgeailabs.bpwatch.mobile.snore.SnoreScheduler
@@ -73,6 +74,8 @@ fun SettingsScreen(
     onRequestMicPermission: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenChangelog: () -> Unit,
+    // v2.3.2: raw sleep facts from Health Connect for the sleep diagnostic.
+    onDiagnoseSleep: suspend () -> SleepDiagnosis,
 ) {
     val model by viewModel.calibrationModel.collectAsState()
     val points by viewModel.calibrationPoints.collectAsState()
@@ -131,6 +134,9 @@ fun SettingsScreen(
                 onRequestMicPermission = onRequestMicPermission,
                 isMicGranted = { viewModel.isMicGranted() },
             )
+            // v2.3.2: shows what Health Connect actually holds for sleep —
+            // grant state, raw sessions, writers, errors.
+            SleepDiagnosticsCard(onDiagnose = onDiagnoseSleep)
         }
 
         SettingsSection(title = "Calibration", icon = Icons.Filled.Tune) {
@@ -425,7 +431,8 @@ private fun SamsungHealthCard(
                 }
             }
             Text(
-                text = "1. In Samsung Health: Settings → Health Connect → allow sharing.\n" +
+                text = "1. In Samsung Health: Settings → Health Connect → allow sharing " +
+                    "(Sleep has its own toggle there — it must be on too).\n" +
                     "2. Below: grant BPWatch permission to read Health Connect.",
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -542,6 +549,17 @@ private fun SamsungHealthCard(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Health Connect settings")
+                }
+            }
+            // v2.3.2: one-tap re-request even when everything looks granted —
+            // covers silently-revoked or stuck grants without a Settings hunt.
+            // The result toast + refreshed list below confirm what changed.
+            if (hcGranted && hcInstalled && !hcNeedsUpdate) {
+                OutlinedButton(
+                    onClick = { onRequestPermissions(hcPermissions) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Re-request permissions")
                 }
             }
         }

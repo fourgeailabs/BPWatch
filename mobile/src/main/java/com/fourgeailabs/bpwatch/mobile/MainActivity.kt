@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -41,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -220,6 +222,21 @@ private fun BpWatchPhoneApp(
     // the default). TrendsScreen clears it once consumed.
     var trendsInitial by remember { mutableStateOf<TrendMetric?>(null) }
     var showCrash by remember(crashReport) { mutableStateOf(crashReport != null) }
+    // v2.3.2: in-app back stack so the system back button walks back through
+    // screens instead of closing the app. SnapshotStateList so the
+    // BackHandler's enabled flag recomposes as the stack changes.
+    val backStack = remember { mutableStateListOf<Int>() }
+    fun goTo(index: Int) {
+        if (index != selected) {
+            backStack.add(selected)
+            selected = index
+        }
+    }
+    fun goBack(): Boolean {
+        val prev = backStack.removeLastOrNull() ?: return false
+        selected = prev
+        return true
+    }
 
     if (showCrash && crashReport != null) {
         val report = crashReport
@@ -302,6 +319,13 @@ private fun BpWatchPhoneApp(
         "Settings" to Icons.Filled.Settings,
     )
 
+    // v2.3.2: system back walks the in-app history. Only with an empty
+    // stack (and no blocking dialog up) does back fall through and close
+    // the app as before.
+    BackHandler(enabled = backStack.isNotEmpty() && !showCrash && !showDisclaimer) {
+        goBack()
+    }
+
     Scaffold(
         topBar = {
             if (selected == 5 || selected == 6 || selected == 7 || selected == 8) {
@@ -317,7 +341,13 @@ private fun BpWatchPhoneApp(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = { selected = if (selected == 7 || selected == 8) 4 else 0 }) {
+                        // v2.3.2: top-bar back pops the same in-app history as
+                        // the system back button, with the old hardcoded
+                        // target as a fallback if the stack is ever empty.
+                        IconButton(onClick = {
+                            if (!goBack()) selected =
+                                if (selected == 7 || selected == 8) 4 else 0
+                        }) {
                             Icon(
                                 Icons.Filled.ArrowBack,
                                 contentDescription = "Back",
@@ -332,7 +362,7 @@ private fun BpWatchPhoneApp(
                 tabs.forEachIndexed { index, (label, icon) ->
                     NavigationBarItem(
                         selected = selected == index,
-                        onClick = { selected = index },
+                        onClick = { goTo(index) },
                         icon = { Icon(icon, contentDescription = label) },
                         label = { Text(label) },
                     )
@@ -344,17 +374,19 @@ private fun BpWatchPhoneApp(
             when (selected) {
                 0 -> HomeScreen(
                     viewModel,
-                    onOpenCalibrate = { selected = 5 },
-                    onOpenWatch = { selected = 3 },
-                    onOpenSettings = { selected = 4 },
-                    onOpenTrends = { metric -> trendsInitial = metric; selected = 1 },
-                    onOpenSnore = { selected = 6 },
+                    onOpenCalibrate = { goTo(5) },
+                    onOpenWatch = { goTo(3) },
+                    onOpenSettings = { goTo(4) },
+                    onOpenTrends = { metric -> trendsInitial = metric; goTo(1) },
+                    onOpenSnore = { goTo(6) },
                 )
                 1 -> TrendsScreen(
                     viewModel,
                     onRequestHcPermissions,
                     initialMetric = trendsInitial,
                     onInitialMetricConsumed = { trendsInitial = null },
+                    // v2.3.2: sleep diagnostic in the sleep empty state.
+                    onDiagnoseSleep = { viewModel.diagnoseSleep() },
                 )
                 2 -> HistoryScreen(viewModel)
                 3 -> WatchInstallScreen()
@@ -362,8 +394,10 @@ private fun BpWatchPhoneApp(
                     viewModel,
                     onRequestHcPermissions,
                     onRequestMicPermission,
-                    onOpenAbout = { selected = 7 },
-                    onOpenChangelog = { selected = 8 },
+                    onOpenAbout = { goTo(7) },
+                    onOpenChangelog = { goTo(8) },
+                    // v2.3.2: sleep diagnostic card in the Sleep section.
+                    onDiagnoseSleep = { viewModel.diagnoseSleep() },
                 )
                 5 -> CalibrateScreen(viewModel)
                 6 -> SnoreScreen(viewModel)

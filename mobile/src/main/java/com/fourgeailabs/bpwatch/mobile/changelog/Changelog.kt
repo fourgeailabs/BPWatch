@@ -20,6 +20,25 @@ data class ChangelogEntry(
 /** Newest first. The full history starts at the first public version. */
 val CHANGELOG: List<ChangelogEntry> = listOf(
     ChangelogEntry(
+        versionName = "2.3.2",
+        versionCode = 27,
+        date = "2026-09-21",
+        notes = listOf(
+            "Trends: every Health Connect graph now has its own refresh button " +
+                "with an \"updated at\" stamp, so a single trend can be re-pulled " +
+                "without switching metrics.",
+            "Settings → Samsung Health has a new \"Re-request permissions\" button " +
+                "that re-fires the permission request even when everything looks " +
+                "granted — for silently-revoked or stuck grants.",
+            "Sleep: new \"Check sleep data\" diagnostic (Settings → Sleep, and in " +
+                "the Trends sleep empty state) showing what Health Connect actually " +
+                "holds — grant state, raw sessions, stage counts, which app wrote " +
+                "them, and any read error.",
+            "Back button: the system back button now walks back through screens " +
+                "instead of closing the app.",
+        ),
+    ),
+    ChangelogEntry(
         versionName = "2.3.1",
         versionCode = 26,
         date = "2026-09-21",

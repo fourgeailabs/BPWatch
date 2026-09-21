@@ -12,13 +12,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -46,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendMetric
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendPoint
+import com.fourgeailabs.bpwatch.mobile.healthconnect.SleepDiagnosis
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -125,9 +132,16 @@ fun TrendsScreen(
     onRequestHcPermissions: (Set<String>) -> Unit,
     initialMetric: TrendMetric? = null,
     onInitialMetricConsumed: () -> Unit = {},
+    // v2.3.2: when provided, the sleep empty state gets a "check what
+    // Health Connect holds" diagnostic button.
+    onDiagnoseSleep: (suspend () -> SleepDiagnosis)? = null,
 ) {
     var metric by remember { mutableStateOf(TrendMetric.HEART_RATE) }
     var range by remember { mutableStateOf(TrendRange.WEEK) }
+    // v2.3.2: per-trend manual refresh — bumping this re-runs the load
+    // effect below for the currently selected trend only.
+    var refreshTick by remember { mutableStateOf(0) }
+    var lastUpdatedMs by remember { mutableStateOf<Long?>(null) }
 
     // A home tile deep-link: preselect the metric, then clear the request.
     LaunchedEffect(initialMetric) {
@@ -137,7 +151,8 @@ fun TrendsScreen(
         }
     }
 
-    val now = remember(range) { System.currentTimeMillis() }
+    // v2.3.2: a manual refresh also re-anchors the window to now.
+    val now = remember(range, refreshTick) { System.currentTimeMillis() }
     val start = now - range.millis
 
     val hrSamples by remember(range) {
@@ -152,7 +167,9 @@ fun TrendsScreen(
     var hcAvailable by remember { mutableStateOf(false) }
     var hcTrend by remember { mutableStateOf<List<HcTrendPoint>>(emptyList()) }
     var hcTrendLoading by remember { mutableStateOf(false) }
-    LaunchedEffect(range, metric) {
+    // v2.3.2: refreshTick re-runs the load for this trend only — the
+    // per-trend refresh button bumps it.
+    LaunchedEffect(range, metric, refreshTick) {
         if (metric.isHcTrend()) {
             // (J) Reset at the start of every load: a fast metric/range
             // switch must never flash the previous metric's stale data while
@@ -168,6 +185,7 @@ fun TrendsScreen(
                 bucketHours = if (range == TrendRange.HOUR || range == TrendRange.DAY) 1L else 24L,
             )
             hcTrendLoading = false
+            lastUpdatedMs = System.currentTimeMillis()
         } else if (metric == TrendMetric.BMI) {
             // BMI isn't a Health Connect trend: it's computed from the weight
             // trend plus the profile height, so only the weight trend loads here.
@@ -183,6 +201,7 @@ fun TrendsScreen(
                 bucketHours = if (range == TrendRange.HOUR || range == TrendRange.DAY) 1L else 24L,
             )
             hcTrendLoading = false
+            lastUpdatedMs = System.currentTimeMillis()
         }
     }
 
@@ -321,6 +340,47 @@ fun TrendsScreen(
 
         val hasData = series.any { it.points.isNotEmpty() }
         val hcLoading = hcTrendLoading
+        // v2.3.2: per-trend refresh. Health Connect trends are pulled on
+        // demand (unlike the watch-recorded metrics, which are live from
+        // the local database), so each one gets its own refresh button
+        // with an "updated at" stamp. It sits above the chart AND the
+        // empty state, so a stale "No data" can be re-pulled in place.
+        if (metric.isHcTrend() || metric == TrendMetric.BMI) {
+            val updatedFmt = remember {
+                DateTimeFormatter.ofPattern("h:mm:ss a")
+                    .withZone(ZoneId.systemDefault())
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = when {
+                        hcLoading -> "Updating ${metric.label.lowercase()}…"
+                        lastUpdatedMs != null ->
+                            "Updated ${updatedFmt.format(Instant.ofEpochMilli(lastUpdatedMs!!))}"
+                        else -> "Not updated yet"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (hcLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    IconButton(onClick = { refreshTick++ }) {
+                        Icon(
+                            Icons.Filled.Refresh,
+                            contentDescription = "Refresh ${metric.label}",
+                        )
+                    }
+                }
+            }
+        }
         when {
             metric.isHcTrend() && !hcAvailable && !hcLoading -> {
                 Card(
@@ -351,29 +411,39 @@ fun TrendsScreen(
                 }
             }
             !hasData -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(260.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        when (metric) {
-                            TrendMetric.HEART_RATE ->
-                                "No recordings yet. Turn on \"Record heart rate continuously\" " +
-                                    "in Settings to start building history."
-                            // v2.3.1: stress history also comes from BP checks,
-                            // so the copy no longer points only at recording.
-                            TrendMetric.STRESS ->
-                                "No stress data yet. Take a BP check on the watch, or turn on " +
-                                    "\"Record heart rate continuously\" in Settings for regular samples."
-                            else -> "No data for this range yet."
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            when (metric) {
+                                TrendMetric.HEART_RATE ->
+                                    "No recordings yet. Turn on \"Record heart rate continuously\" " +
+                                        "in Settings to start building history."
+                                // v2.3.1: stress history also comes from BP checks,
+                                // so the copy no longer points only at recording.
+                                TrendMetric.STRESS ->
+                                    "No stress data yet. Take a BP check on the watch, or turn on " +
+                                        "\"Record heart rate continuously\" in Settings for regular samples."
+                                TrendMetric.SLEEP ->
+                                    "No sleep data for this range yet."
+                                else -> "No data for this range yet."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp),
+                        )
+                    }
+                    // v2.3.2: sleep "no data" gets the diagnostic inline —
+                    // it shows what Health Connect actually holds, so a
+                    // missing Samsung Health share stops being a mystery.
+                    if (metric == TrendMetric.SLEEP && onDiagnoseSleep != null) {
+                        SleepDiagnosticsCard(onDiagnose = onDiagnoseSleep)
+                    }
                 }
             }
             else -> {

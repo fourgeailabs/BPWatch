@@ -19,6 +19,7 @@ import com.fourgeailabs.bpwatch.mobile.data.SnoreEvent
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendMetric
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HcTrendPoint
+import com.fourgeailabs.bpwatch.mobile.healthconnect.SleepDiagnosis
 import com.fourgeailabs.bpwatch.mobile.healthconnect.TodayMetrics
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringConfig
 import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringPrefs
@@ -654,6 +655,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             emptyList()
         }
     }
+
+    /**
+     * v2.3.2: raw sleep facts from Health Connect for the sleep diagnostic
+     * card (grant state, sessions held, origins, errors).
+     */
+    suspend fun diagnoseSleep(): SleepDiagnosis = hc.diagnoseSleep()
 
     private fun timeAgo(instant: java.time.Instant): String {
         val mins = java.time.Duration.between(instant, java.time.Instant.now())
