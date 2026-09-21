@@ -28,16 +28,19 @@ object WatchUpdater {
     )
 
     /**
-     * Reads the bundled watch APK (extracting it from assets on first use)
-     * and returns its version. Null when the bundle is missing or unreadable.
+     * Reads the bundled watch APK (extracting a fresh copy from assets) and
+     * returns its version. Null when the bundle is missing or unreadable.
+     *
+     * NOTE: the asset is re-extracted on every call. cacheDir survives app
+     * updates, so extracting only "if (!out.exists())" pinned us to the
+     * previous phone build's watch APK forever — the Watch tab reported the
+     * old version and "Send update" would beam the old build to the watch.
      */
     fun getBundledApk(context: Context): BundledApk? {
         return try {
             val out = File(context.cacheDir, "bpwatch-wear.apk")
-            if (!out.exists()) {
-                context.assets.open("bpwatch-wear.apk").use { ins ->
-                    out.outputStream().use { outs -> ins.copyTo(outs) }
-                }
+            context.assets.open("bpwatch-wear.apk").use { ins ->
+                out.outputStream().use { outs -> ins.copyTo(outs) }
             }
             @Suppress("DEPRECATION")
             val info = context.packageManager.getPackageArchiveInfo(
