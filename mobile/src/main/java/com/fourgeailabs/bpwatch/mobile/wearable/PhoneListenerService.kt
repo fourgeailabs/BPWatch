@@ -5,6 +5,7 @@ import com.fourgeailabs.bpwatch.mobile.BpRepository
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationEngine
 import com.fourgeailabs.bpwatch.mobile.data.Reading
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
+import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringPrefs
 import com.fourgeailabs.bpwatch.mobile.notifications.NotificationHelper
 import com.google.android.gms.wearable.DataMap
 import com.google.android.gms.wearable.MessageEvent
@@ -29,7 +30,31 @@ class PhoneListenerService : WearableListenerService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onMessageReceived(event: MessageEvent) {
-        if (event.path != Link.PATH_HR_READING) return
+        when (event.path) {
+            Link.PATH_INTERVAL_SET -> handleIntervalSet(event)
+            Link.PATH_HR_READING -> handleHrReading(event)
+        }
+    }
+
+    /**
+     * The user picked a new BP-check interval on the watch. Persist it so the
+     * phone and watch stay in sync.
+     */
+    private fun handleIntervalSet(event: MessageEvent) {
+        scope.launch {
+            try {
+                val minutes = DataMap.fromByteArray(event.data)
+                    .getInt(Link.KEY_BP_INTERVAL_MIN)
+                MonitoringPrefs(applicationContext).update {
+                    it.copy(bpIntervalMinutes = minutes)
+                }
+            } catch (_: Exception) {
+                // Never crash the listener on a malformed message.
+            }
+        }
+    }
+
+    private fun handleHrReading(event: MessageEvent) {
         scope.launch {
             try {
                 val map = DataMap.fromByteArray(event.data)
@@ -79,10 +104,12 @@ class PhoneListenerService : WearableListenerService() {
                         // Watch may be out of range; the reading is still stored.
                     }
 
-                    // Latest SpO2 for the notification (best effort).
+                    // Latest SpO2 for the notification (best effort). Gated on
+                    // the read permission only — the BP write grant is
+                    // irrelevant to reading SpO2.
                     val spo2 = try {
                         val hc = HealthConnectManager(applicationContext)
-                        if (hc.isAvailable && hc.hasPermissions()) hc.readLatestSpo2() else null
+                        if (hc.isAvailable && hc.hasReadPermissions()) hc.readLatestSpo2() else null
                     } catch (_: Exception) {
                         null
                     }
@@ -130,6 +157,22 @@ class PhoneListenerService : WearableListenerService() {
                     Wearable.getMessageClient(applicationContext)
                         .sendMessage(event.sourceNodeId, Link.PATH_CALIBRATION, calibratedPayload)
                         .await()
+                } catch (_: Exception) {
+                }
+
+                // Re-send monitoring settings to this node: a reading proves
+                // the watch is reachable, which covers reconnects and watch
+                // app reinstalls. Only once the user has configured them —
+                // otherwise the watch keeps its existing schedule.
+                try {
+                    val monitoringPrefs = MonitoringPrefs(applicationContext)
+                    if (monitoringPrefs.isConfigured()) {
+                        WatchConfigSender.sendToNode(
+                            applicationContext,
+                            event.sourceNodeId,
+                            monitoringPrefs.config.value,
+                        )
+                    }
                 } catch (_: Exception) {
                 }
             } catch (_: Exception) {

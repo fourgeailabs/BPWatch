@@ -33,11 +33,8 @@ import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Scaffold
-import androidx.wear.compose.material.Switch
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
-import androidx.wear.compose.material.ToggleChip
-import androidx.wear.compose.material.ToggleChipDefaults
 import androidx.wear.compose.material.Vignette
 import androidx.wear.compose.material.VignettePosition
 import kotlinx.coroutines.delay
@@ -47,18 +44,29 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var hrMonitor: HeartRateMonitor
 
-    private val permissionLauncher = registerForActivityResult(
+    private val bodySensorLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { /* re-checked before each measurement */ }
 
+    private val notificationLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* alerts degrade to the full-screen activity only */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Estimates can arrive while the UI process is dead (hourly checks).
+        // Estimates can arrive while the UI process is dead (scheduled checks).
         WatchState.restoreFromPrefs(this)
         // Alarms don't survive app updates — re-arm if needed.
-        HourlyCheck.ensureScheduled(this)
+        CheckScheduler.ensureScheduled(this)
+        // Continuous-HR service resumes here after reboot (it can't be
+        // started from the boot receiver on Android 12+).
+        try {
+            HrMonitorService.ensureRunning(this)
+        } catch (_: Exception) {
+        }
         hrMonitor = HeartRateMonitor(this)
         ensureBodySensorPermission()
+        ensureNotificationPermission()
         setContent {
             MaterialTheme {
                 BpWatchApp(hrMonitor) { ensureBodySensorPermission() }
@@ -70,7 +78,16 @@ class MainActivity : ComponentActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.BODY_SENSORS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            permissionLauncher.launch(Manifest.permission.BODY_SENSORS)
+            bodySensorLauncher.launch(Manifest.permission.BODY_SENSORS)
+        }
+    }
+
+    private fun ensureNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 }
@@ -101,20 +118,28 @@ private fun BpWatchApp(
     var sentHr by remember { mutableStateOf<Float?>(null) }
     var sentStress by remember { mutableStateOf(-1) }
     var errorMessage by remember { mutableStateOf("") }
-    var checkMode by remember { mutableStateOf(WatchSettings.getCheckMode(context)) }
-
+    var pickingInterval by remember { mutableStateOf(false) }
     val lastEstimate by WatchState.lastEstimate.collectAsState()
     val calibrated by WatchState.calibrated.collectAsState()
+    val monitorConfig by WatchState.monitorConfig.collectAsState()
+    val liveContinuousHr by WatchState.liveHr.collectAsState()
     val scope = rememberCoroutineScope()
 
-    fun setMode(mode: WatchSettings.CheckMode) {
-        WatchSettings.setCheckMode(appContext, mode)
-        if (mode == WatchSettings.CheckMode.HOURLY) {
-            HourlyCheck.schedule(appContext)
-        } else {
-            HourlyCheck.cancel(appContext)
+    /**
+     * Applies a BP-check interval picked on the watch: persists it, re-arms
+     * the scheduler, updates the UI, and tells the phone so both stay in sync
+     * (the phone re-broadcasts its config on every reading, which would
+     * otherwise clobber the watch's choice).
+     */
+    fun applyInterval(minutes: Int) {
+        val updated = WatchSettings.getMonitorConfig(appContext)
+            .copy(bpIntervalMinutes = minutes)
+        WatchSettings.saveMonitorConfig(appContext, updated)
+        WatchState.onMonitorConfig(updated)
+        CheckScheduler.reschedule(appContext)
+        scope.launch {
+            DataLayer.sendIntervalSet(appContext, minutes)
         }
-        checkMode = mode
     }
 
     fun startMeasurement() {
@@ -153,6 +178,11 @@ private fun BpWatchApp(
             val avg = valid.average().toFloat()
             uiState = UiState.SENDING
             sentHr = avg
+            try {
+                AlertManager.checkHeartRate(monitor.appContext, avg)
+            } catch (_: Exception) {
+                // Alerting must never break a manual measurement.
+            }
             val stress = StressEstimator.estimate(
                 valid,
                 WatchSettings.getRestingHr(appContext),
@@ -185,7 +215,7 @@ private fun BpWatchApp(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = "BPWatch",
                     style = MaterialTheme.typography.title3,
@@ -195,37 +225,47 @@ private fun BpWatchApp(
             }
 
             when (uiState) {
-                UiState.IDLE -> {
-                    val est = lastEstimate
-                    val hourlyOn = checkMode == WatchSettings.CheckMode.HOURLY
+                UiState.IDLE -> if (pickingInterval) {
+                    // Check-frequency picker: a pop-up menu of intervals.
                     item {
-                        if (est != null) {
-                            Text(
-                                text = "${est.sys}/${est.dia}",
-                                style = MaterialTheme.typography.display2,
-                                textAlign = TextAlign.Center,
-                            )
-                            Text(
-                                text = "mmHg · ${timeAgo(est.timestamp)}",
-                                style = MaterialTheme.typography.caption2,
-                                textAlign = TextAlign.Center,
-                            )
-                        } else {
-                            Text(
-                                text = "--/--",
-                                style = MaterialTheme.typography.display2,
-                                textAlign = TextAlign.Center,
-                            )
-                            Text(
-                                text = if (calibrated) "Calibrated — take a reading"
-                                else "Not calibrated — set up on your phone",
-                                style = MaterialTheme.typography.caption2,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 12.dp),
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = "Check frequency",
+                            style = MaterialTheme.typography.title3,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    WATCH_INTERVAL_CHOICES.forEach { minutes ->
+                        item {
+                            val selected = monitorConfig?.bpIntervalMinutes == minutes
+                            Chip(
+                                onClick = {
+                                    applyInterval(minutes)
+                                    pickingInterval = false
+                                },
+                                label = {
+                                    Text(
+                                        if (selected) "✓ ${bpIntervalLabel(minutes)}"
+                                        else bpIntervalLabel(minutes),
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(0.9f),
+                                colors = if (selected) ChipDefaults.primaryChipColors()
+                                else ChipDefaults.secondaryChipColors(),
                             )
                         }
                     }
-                    if (est != null && !calibrated) {
+                    item {
+                        Chip(
+                            onClick = { pickingInterval = false },
+                            label = { Text("Cancel", textAlign = TextAlign.Center) },
+                            modifier = Modifier.fillMaxWidth(0.9f),
+                        )
+                        Spacer(Modifier.height(32.dp))
+                    }
+                } else {
+                    // Calibration status sits where the title used to be.
+                    if (!calibrated) {
                         item {
                             Text(
                                 text = "Not calibrated — set up on your phone",
@@ -235,6 +275,25 @@ private fun BpWatchApp(
                             )
                         }
                     }
+                    item { Spacer(Modifier.height(24.dp)) }
+                    item {
+                        // The reading is the hero: dead centre of the display.
+                        val est = lastEstimate
+                        Text(
+                            text = if (est != null) "${est.sys}/${est.dia}" else "--/--",
+                            style = MaterialTheme.typography.display2,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            text = if (est != null) "mmHg · ${timeAgo(est.timestamp)}"
+                            else if (calibrated) "Calibrated — take a reading"
+                            else "Take a reading when ready",
+                            style = MaterialTheme.typography.caption2,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                        )
+                    }
+                    item { Spacer(Modifier.height(16.dp)) }
                     item {
                         Chip(
                             onClick = { startMeasurement() },
@@ -244,26 +303,23 @@ private fun BpWatchApp(
                         )
                     }
                     item {
-                        ToggleChip(
-                            checked = hourlyOn,
-                            onCheckedChange = { on ->
-                                setMode(
-                                    if (on) WatchSettings.CheckMode.HOURLY
-                                    else WatchSettings.CheckMode.MANUAL,
-                                )
-                            },
-                            label = { Text("Hourly checks", textAlign = TextAlign.Center) },
-                            toggleControl = { Switch(checked = hourlyOn) },
+                        val cfg = monitorConfig
+                        Chip(
+                            onClick = { pickingInterval = true },
+                            label = { Text("Blood-pressure checks") },
                             secondaryLabel = {
-                                Text(
-                                    text = if (hourlyOn) "Auto-checks every hour"
-                                    else "Manual checks only",
-                                    textAlign = TextAlign.Center,
-                                )
+                                Text(bpIntervalLabel(cfg?.bpIntervalMinutes ?: 0))
                             },
                             modifier = Modifier.fillMaxWidth(0.85f),
-                            colors = ToggleChipDefaults.toggleChipColors(),
                         )
+                        if (cfg?.continuousHr == true && liveContinuousHr > 0) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "♥ ${liveContinuousHr.toInt()} bpm",
+                                style = MaterialTheme.typography.title3,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                         Spacer(Modifier.height(24.dp))
                     }
                 }

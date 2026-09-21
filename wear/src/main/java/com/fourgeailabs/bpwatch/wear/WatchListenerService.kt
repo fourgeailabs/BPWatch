@@ -7,7 +7,8 @@ import com.google.android.gms.wearable.WearableListenerService
 
 /**
  * Receives blood-pressure estimates (and calibration status) back from the
- * phone app so the watch can display the latest result.
+ * phone app so the watch can display the latest result — plus the
+ * "Monitoring & alerts" config, which is applied immediately.
  */
 class WatchListenerService : WearableListenerService() {
 
@@ -20,8 +21,14 @@ class WatchListenerService : WearableListenerService() {
                 val timestamp = map.getLong(Link.KEY_TIMESTAMP)
                 WatchState.onEstimate(sys, dia, timestamp)
                 // Persist: the estimate may arrive while the UI isn't running
-                // (hourly background checks).
+                // (scheduled background checks).
                 WatchSettings.saveEstimate(this, sys, dia, timestamp)
+                // Blood-pressure alerts fire on every estimate.
+                try {
+                    AlertManager.checkBloodPressure(this, sys, dia)
+                } catch (_: Exception) {
+                    // Alerting must never break estimate handling.
+                }
             }
             Link.PATH_CALIBRATION -> {
                 val map = DataMap.fromByteArray(event.data)
@@ -30,6 +37,28 @@ class WatchListenerService : WearableListenerService() {
                 WatchSettings.saveCalibrated(this, calibrated)
                 if (map.containsKey(Link.KEY_RESTING_HR)) {
                     WatchSettings.saveRestingHr(this, map.getFloat(Link.KEY_RESTING_HR))
+                }
+            }
+            Link.PATH_MONITORING_CONFIG -> {
+                val config = try {
+                    WatchSettings.parseMonitorConfig(DataMap.fromByteArray(event.data))
+                } catch (_: Exception) {
+                    return
+                }
+                WatchSettings.saveMonitorConfig(this, config)
+                WatchState.onMonitorConfig(config)
+                // Apply immediately: (re)schedule checks, start/stop
+                // continuous HR.
+                try {
+                    CheckScheduler.reschedule(this)
+                } catch (_: Exception) {
+                }
+                try {
+                    // May no-op on Android 12+ when the UI is dead (background
+                    // foreground-service starts are blocked) — MainActivity
+                    // picks it up on next launch; the config is persisted.
+                    HrMonitorService.ensureRunning(this)
+                } catch (_: Exception) {
                 }
             }
         }

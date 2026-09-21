@@ -16,6 +16,7 @@ import androidx.health.connect.client.units.Percentage
 import androidx.health.connect.client.units.Pressure
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Health Connect bridge — this is also the Samsung Health path.
@@ -80,6 +81,14 @@ class HealthConnectManager(private val context: Context) {
         client.permissionController.getGrantedPermissions().containsAll(permissions)
 
     /**
+     * Read-permissions only. SpO2 reads must never depend on the unrelated
+     * blood-pressure WRITE grant — a user who denies writing BP would
+     * otherwise silently lose SpO2 reads too.
+     */
+    suspend fun hasReadPermissions(): Boolean =
+        client.permissionController.getGrantedPermissions().containsAll(readPermissions)
+
+    /**
      * Per-permission Android runtime status (granted/denied), for diagnostics.
      * Short names keep the Settings card readable.
      */
@@ -89,20 +98,32 @@ class HealthConnectManager(private val context: Context) {
         "$short: ${if (granted) "granted ✓" else "not granted"}"
     }
 
-    /** Latest SpO2 % from the last 7 days, or null. */
-    suspend fun readLatestSpo2(): Int? {
-        val end = Instant.now()
-        val start = end.minus(7, ChronoUnit.DAYS)
-        val response = client.readRecords(
-            ReadRecordsRequest(
-                recordType = OxygenSaturationRecord::class,
-                timeRangeFilter = TimeRangeFilter.between(start, end),
-            )
-        )
-        return response.records
+    /**
+     * Latest SpO2 % from the last 7 days, or null. Wrapped in a timeout:
+     * Health Connect queries against Samsung Health can hang indefinitely.
+     */
+    suspend fun readLatestSpo2(): Int? = withTimeoutOrNull(SPO2_QUERY_TIMEOUT_MS) {
+        spo2RecordsLast7Days()
             .maxByOrNull { it.time }
             ?.percentage
             ?.let { pct: Percentage -> pct.value.toInt() }
+    }
+
+    /** Count + newest timestamp of SpO2 records in the last 7 days, for diagnostics. */
+    suspend fun readSpo2Stats(): Spo2Stats? = withTimeoutOrNull(SPO2_QUERY_TIMEOUT_MS) {
+        val records = spo2RecordsLast7Days()
+        Spo2Stats(count = records.size, newest = records.maxByOrNull { it.time }?.time)
+    }
+
+    private suspend fun spo2RecordsLast7Days(): List<OxygenSaturationRecord> {
+        val end = Instant.now()
+        val start = end.minus(7, ChronoUnit.DAYS)
+        return client.readRecords(
+            ReadRecordsRequest(
+                recordType = OxygenSaturationRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(start, end),
+            ),
+        ).records
     }
 
     /** Publishes an estimated BP reading so Health Connect apps can use it. */
@@ -121,6 +142,9 @@ class HealthConnectManager(private val context: Context) {
     companion object {
         private const val SAMSUNG_HEALTH_PKG = "com.sec.android.app.shealth"
         private const val HC_PLAY_STORE_PKG = "com.google.android.apps.healthdata"
+
+        /** SpO2 queries against Samsung Health can hang — never wait forever. */
+        private const val SPO2_QUERY_TIMEOUT_MS = 15_000L
 
         /** True when the Health Connect app / system component can handle intents. */
         fun isHealthConnectInstalled(context: Context): Boolean {
@@ -231,3 +255,6 @@ class HealthConnectManager(private val context: Context) {
         }
     }
 }
+
+/** SpO2 diagnostic: how many records Health Connect returned in the last 7 days. */
+data class Spo2Stats(val count: Int, val newest: java.time.Instant?)

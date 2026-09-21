@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
@@ -33,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -42,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -52,6 +56,7 @@ import com.fourgeailabs.bpwatch.BuildConfig
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
 import com.fourgeailabs.bpwatch.mobile.calibration.CalibrationEngine
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
+import com.fourgeailabs.bpwatch.mobile.monitoring.MonitoringConfig
 import com.fourgeailabs.bpwatch.mobile.profile.UserProfile
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,6 +68,7 @@ fun SettingsScreen(
     val model by viewModel.calibrationModel.collectAsState()
     val points by viewModel.calibrationPoints.collectAsState()
     val profile by viewModel.userProfile.collectAsState()
+    val monitoring by viewModel.monitoringConfig.collectAsState()
 
     Column(
         modifier = Modifier
@@ -84,10 +90,18 @@ fun SettingsScreen(
                 hcStatusText = viewModel.hcStatusText,
                 hcNeedsUpdate = viewModel.hcNeedsUpdate,
                 hcPermissionDetails = viewModel.hcPermissionDetails,
+                spo2Diagnostic = viewModel.spo2Diagnostic,
                 hcPermissions = viewModel.hcPermissions,
                 hcReadPermissions = viewModel.hcReadPermissions,
                 onRequestPermissions = onRequestHealthConnectPermissions,
                 onRefresh = { viewModel.refreshHealthConnect() },
+            )
+        }
+
+        SettingsSection(title = "Monitoring & alerts", icon = Icons.Filled.MonitorHeart) {
+            MonitoringCard(
+                config = monitoring,
+                onUpdate = { viewModel.updateMonitoring(it) },
             )
         }
 
@@ -294,6 +308,7 @@ private fun SamsungHealthCard(
     hcStatusText: String,
     hcNeedsUpdate: Boolean,
     hcPermissionDetails: List<String>,
+    spo2Diagnostic: String,
     hcPermissions: Set<String>,
     hcReadPermissions: Set<String>,
     onRequestPermissions: (Set<String>) -> Unit,
@@ -376,6 +391,16 @@ private fun SamsungHealthCard(
                 }
             }
 
+            // SpO2 diagnostic: record count from the last 7 days, or why
+            // there are none. Updates on every refresh.
+            if (spo2Diagnostic.isNotEmpty()) {
+                Text(
+                    text = spo2Diagnostic,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             if (samsungInstalled) {
                 OutlinedButton(
                     onClick = { HealthConnectManager.openSamsungHealth(context) },
@@ -436,4 +461,229 @@ private fun SamsungHealthCard(
             }
         }
     }
+}
+
+/**
+ * "Monitoring & alerts" — tells the watch what to keep an eye on. Every
+ * change is pushed to the watch immediately (see MainViewModel.updateMonitoring).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MonitoringCard(
+    config: MonitoringConfig,
+    onUpdate: ((MonitoringConfig) -> MonitoringConfig) -> Unit,
+) {
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TintedIcon(icon = Icons.Filled.MonitorHeart, contentDescription = null)
+                Text(
+                    "Your watch does the measuring — these settings tell it what " +
+                        "to watch for. Changes are sent to your watch straight away.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            SwitchRow(
+                headline = "Continuous heart rate",
+                subtitle = "Keeps the heart-rate sensor on all day. Uses noticeably more battery.",
+                checked = config.continuousHr,
+                onCheckedChange = { checked -> onUpdate { cfg -> cfg.copy(continuousHr = checked) } },
+            )
+
+            MonitoringSubHeader("Heart-rate alert")
+            SwitchRow(
+                headline = "High heart-rate alert",
+                subtitle = "Buzz your watch when your heart rate goes over the limit.",
+                checked = config.hrHighEnabled,
+                onCheckedChange = { enabled -> onUpdate { cfg -> cfg.copy(hrHighEnabled = enabled) } },
+            )
+            if (config.hrHighEnabled) {
+                ThresholdField(
+                    label = "Alert above",
+                    unit = "bpm",
+                    value = config.hrHighThreshold,
+                    range = MonitoringConfig.HR_THRESHOLD_MIN..MonitoringConfig.HR_THRESHOLD_MAX,
+                    onCommit = { value -> onUpdate { cfg -> cfg.copy(hrHighThreshold = value) } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            MonitoringSubHeader("Blood-pressure checks")
+            var freqExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
+                expanded = freqExpanded,
+                onExpandedChange = { freqExpanded = it },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                OutlinedTextField(
+                    value = MonitoringConfig.intervalLabel(config.bpIntervalMinutes),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Check frequency") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(freqExpanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    singleLine = true,
+                )
+                ExposedDropdownMenu(
+                    expanded = freqExpanded,
+                    onDismissRequest = { freqExpanded = false },
+                ) {
+                    MonitoringConfig.INTERVAL_OPTIONS.forEach { minutes ->
+                        DropdownMenuItem(
+                            text = { Text(MonitoringConfig.intervalLabel(minutes)) },
+                            onClick = {
+                                onUpdate { it.copy(bpIntervalMinutes = minutes) }
+                                freqExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
+            Text(
+                "Each check samples your heart rate in the background and " +
+                    "estimates blood pressure from your calibration.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            MonitoringSubHeader("Blood-pressure alerts")
+            SwitchRow(
+                headline = "High blood-pressure alert",
+                subtitle = "Buzz when systolic or diastolic reaches your high limit.",
+                checked = config.bpHighEnabled,
+                onCheckedChange = { enabled -> onUpdate { cfg -> cfg.copy(bpHighEnabled = enabled) } },
+            )
+            if (config.bpHighEnabled) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ThresholdField(
+                        label = "Sys ≥",
+                        unit = "mmHg",
+                        value = config.sysHigh,
+                        range = MonitoringConfig.BP_SYS_MIN..MonitoringConfig.BP_SYS_MAX,
+                        onCommit = { value -> onUpdate { cfg -> cfg.copy(sysHigh = value) } },
+                        modifier = Modifier.weight(1f),
+                    )
+                    ThresholdField(
+                        label = "Dia ≥",
+                        unit = "mmHg",
+                        value = config.diaHigh,
+                        range = MonitoringConfig.BP_DIA_MIN..MonitoringConfig.BP_DIA_MAX,
+                        onCommit = { value -> onUpdate { cfg -> cfg.copy(diaHigh = value) } },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            SwitchRow(
+                headline = "Low blood-pressure alert",
+                subtitle = "Buzz when systolic or diastolic drops to your low limit.",
+                checked = config.bpLowEnabled,
+                onCheckedChange = { enabled -> onUpdate { cfg -> cfg.copy(bpLowEnabled = enabled) } },
+            )
+            if (config.bpLowEnabled) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ThresholdField(
+                        label = "Sys ≤",
+                        unit = "mmHg",
+                        value = config.sysLow,
+                        range = MonitoringConfig.BP_SYS_MIN..MonitoringConfig.BP_SYS_MAX,
+                        onCommit = { value -> onUpdate { cfg -> cfg.copy(sysLow = value) } },
+                        modifier = Modifier.weight(1f),
+                    )
+                    ThresholdField(
+                        label = "Dia ≤",
+                        unit = "mmHg",
+                        value = config.diaLow,
+                        range = MonitoringConfig.BP_DIA_MIN..MonitoringConfig.BP_DIA_MAX,
+                        onCommit = { value -> onUpdate { cfg -> cfg.copy(diaLow = value) } },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Alerts buzz on your watch and show the reading that tripped them. " +
+                    "Each alert type waits 15 minutes before buzzing again.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MonitoringSubHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun SwitchRow(
+    headline: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        headlineContent = {
+            Text(headline, style = MaterialTheme.typography.titleSmall)
+        },
+        supportingContent = {
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        trailingContent = {
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * A numeric threshold field that commits (validates + clamps) when the user
+ * taps Done or moves focus away.
+ */
+@Composable
+private fun ThresholdField(
+    label: String,
+    unit: String,
+    value: Int,
+    range: IntRange,
+    onCommit: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    fun commit() {
+        val parsed = text.toIntOrNull()?.coerceIn(range) ?: value
+        text = parsed.toString()
+        if (parsed != value) onCommit(parsed)
+    }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { text = it.filter { c -> c.isDigit() }.take(3) },
+        label = { Text(label) },
+        suffix = { Text(unit) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        keyboardActions = KeyboardActions(onDone = { commit() }),
+        singleLine = true,
+        modifier = modifier.onFocusChanged { if (!it.isFocused) commit() },
+    )
 }

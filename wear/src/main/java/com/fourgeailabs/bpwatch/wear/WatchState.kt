@@ -17,6 +17,13 @@ object WatchState {
     private val _calibrated = MutableStateFlow(false)
     val calibrated: StateFlow<Boolean> = _calibrated
 
+    private val _monitorConfig = MutableStateFlow<MonitorConfig?>(null)
+    val monitorConfig: StateFlow<MonitorConfig?> = _monitorConfig
+
+    /** Latest live heart-rate sample from continuous monitoring, 0 when off. */
+    private val _liveHr = MutableStateFlow(0f)
+    val liveHr: StateFlow<Float> = _liveHr
+
     fun onEstimate(sys: Int, dia: Int, timestamp: Long) {
         _lastEstimate.value = BpEstimate(sys, dia, timestamp)
     }
@@ -25,13 +32,22 @@ object WatchState {
         _calibrated.value = calibrated
     }
 
+    fun onMonitorConfig(config: MonitorConfig) {
+        _monitorConfig.value = config
+    }
+
+    fun onLiveHr(hr: Float) {
+        _liveHr.value = hr
+    }
+
     /**
      * Seed from persisted prefs on UI start. Estimates can arrive while the
-     * UI process is dead (hourly background checks), so the persisted copy is
+     * UI process is dead (scheduled background checks), so the persisted copy is
      * the source of truth across restarts.
      */
     fun restoreFromPrefs(context: Context) {
         WatchSettings.loadEstimate(context)?.let { _lastEstimate.value = it }
         _calibrated.value = WatchSettings.isCalibrated(context)
+        _monitorConfig.value = WatchSettings.getMonitorConfig(context)
     }
 }
