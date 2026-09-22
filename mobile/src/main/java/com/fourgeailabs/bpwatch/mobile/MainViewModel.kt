@@ -688,6 +688,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun getSleepDetail(wakeDate: java.time.LocalDate) =
         hc.getSleepDetail(wakeDate)
 
+    /** v2.4.6: last 7 nights for the sleep overview screen. */
+    suspend fun getSleepWeek(endWakeDate: java.time.LocalDate) =
+        hc.getSleepWeek(endWakeDate)
+
     private fun timeAgo(instant: java.time.Instant): String {
         val mins = java.time.Duration.between(instant, java.time.Instant.now())
             .toMinutes().coerceAtLeast(0)

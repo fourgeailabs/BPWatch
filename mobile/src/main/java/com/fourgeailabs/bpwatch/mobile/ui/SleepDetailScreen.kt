@@ -70,10 +70,11 @@ private val LightPurple = Color(0xFFB39DDB)
 @Composable
 fun SleepDetailScreen(
     viewModel: MainViewModel,
+    initialDate: LocalDate = LocalDate.now(),
     onBack: () -> Unit,
     onOpenSnore: () -> Unit,
 ) {
-    var wakeDate by remember { mutableStateOf(LocalDate.now()) }
+    var wakeDate by remember(initialDate) { mutableStateOf(initialDate) }
     var detail by remember { mutableStateOf<SleepDetail?>(null) }
     var loading by remember { mutableStateOf(true) }
     var expandedCard by remember { mutableStateOf<String?>(null) }

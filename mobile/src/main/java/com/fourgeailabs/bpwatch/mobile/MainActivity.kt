@@ -73,6 +73,8 @@ import com.fourgeailabs.bpwatch.mobile.ui.MonitoringSettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SleepSettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SleepDetailScreen
+import com.fourgeailabs.bpwatch.mobile.ui.SleepOverviewScreen
+import com.fourgeailabs.bpwatch.mobile.ui.SleepConsistencyScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SnoreScreen
 import com.fourgeailabs.bpwatch.mobile.ui.TrendMetric
 import com.fourgeailabs.bpwatch.mobile.ui.TrendsScreen
@@ -253,6 +255,8 @@ private fun BpWatchPhoneApp(
     // tab switch opens Trends with the metric preselected (Week range is
     // the default). TrendsScreen clears it once consumed.
     var trendsInitial by remember { mutableStateOf<TrendMetric?>(null) }
+    // v2.4.6: which night the sleep detail screen opens on.
+    var sleepDetailDate by remember { mutableStateOf(java.time.LocalDate.now()) }
     var showCrash by remember(crashReport) { mutableStateOf(crashReport != null) }
     // v2.3.2: in-app back stack so the system back button walks back through
     // screens instead of closing the app. SnapshotStateList so the
@@ -421,7 +425,7 @@ private fun BpWatchPhoneApp(
                     onOpenSnore = { goTo(5) },
                     // v2.4.6: Sleep shortcut replaces the redundant Start button.
                     // Opens the sleep detail screen, not settings.
-                    onOpenSleep = { goTo(13) },
+                    onOpenSleep = { goTo(14) },
                 )
                 1 -> TrendsScreen(
                     viewModel,
@@ -461,8 +465,21 @@ private fun BpWatchPhoneApp(
                 // v2.4.6: sleep detail screen (hypnogram, stages, metrics).
                 13 -> SleepDetailScreen(
                     viewModel,
-                    onBack = { goTo(0) },
+                    initialDate = sleepDetailDate,
+                    onBack = { goTo(14) },
                     onOpenSnore = { goTo(5) },
+                )
+                // v2.4.6: sleep overview (7-day charts, guidance).
+                14 -> SleepOverviewScreen(
+                    viewModel,
+                    onBack = { goTo(0) },
+                    onOpenConsistency = { goTo(15) },
+                    onSelectNight = { date -> sleepDetailDate = date; goTo(13) },
+                )
+                // v2.4.6: sleep consistency.
+                15 -> SleepConsistencyScreen(
+                    viewModel,
+                    onBack = { goTo(14) },
                 )
             }
         }

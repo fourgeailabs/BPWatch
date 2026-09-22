@@ -571,6 +571,128 @@ class HealthConnectManager(private val context: Context) {
      * within the session window. v2.4.6: searches full history (not just 14d)
      * so older nights are reachable.
      */
+    /**
+     * v2.4.6: one night's sleep summary for the 7-day overview and
+     * consistency screens. Null sleepMinutes means no session that night.
+     */
+    data class SleepNightSummary(
+        val wakeDate: LocalDate,
+        val bedtime: Instant?,
+        val wakeTime: Instant?,
+        val timeInBedMinutes: Long?,
+        val actualSleepMinutes: Long?,
+        val sleepScore: Int?,
+        val deepMinutes: Long,
+        val remMinutes: Long,
+        val lightMinutes: Long,
+        val awakeMinutes: Long,
+    )
+
+    /**
+     * v2.4.6: last 7 nights (by wake date) for the sleep overview screen.
+     * Each night carries its session times, stage breakdown and computed
+     * sleep score. Nights with no session get nulls.
+     */
+    suspend fun getSleepWeek(endWakeDate: LocalDate): List<SleepNightSummary> =
+        withTimeoutOrNull(HC_QUERY_TIMEOUT_MS) {
+            val now = Instant.now()
+            val sessions = readAllRecords<SleepSessionRecord>(
+                TimeRangeFilter.between(HISTORY_EPOCH, now),
+            )
+            val byWakeDate = sessions.groupBy { wakeDate(it) }
+            (0..6).map { back ->
+                val date = endWakeDate.minusDays(back.toLong())
+                val daySessions = byWakeDate[date].orEmpty()
+                val session = daySessions.maxByOrNull { it.endTime }
+                if (session == null) {
+                    SleepNightSummary(
+                        wakeDate = date, bedtime = null, wakeTime = null,
+                        timeInBedMinutes = null, actualSleepMinutes = null,
+                        sleepScore = null, deepMinutes = 0, remMinutes = 0,
+                        lightMinutes = 0, awakeMinutes = 0,
+                    )
+                } else {
+                    val stageMins = mutableMapOf<Int, Long>()
+                    for (s in session.stages) {
+                        val m = ChronoUnit.MINUTES.between(s.startTime, s.endTime)
+                        stageMins[s.stage] = (stageMins[s.stage] ?: 0L) + m
+                    }
+                    val awakeM = stageMins[SleepSessionRecord.STAGE_TYPE_AWAKE] ?: 0L
+                    val remM = stageMins[SleepSessionRecord.STAGE_TYPE_REM] ?: 0L
+                    val lightM = (stageMins[SleepSessionRecord.STAGE_TYPE_LIGHT] ?: 0L) +
+                            (stageMins[SleepSessionRecord.STAGE_TYPE_UNKNOWN] ?: 0L)
+                    val deepM = stageMins[SleepSessionRecord.STAGE_TYPE_DEEP] ?: 0L
+                    val tib = ChronoUnit.MINUTES.between(session.startTime, session.endTime)
+                    val actual = sleepMinutes(session)
+                    // Reuse the same scoring as the detail screen.
+                    val detail = SleepDetail(
+                        wakeDate = date, sessionStart = session.startTime,
+                        sessionEnd = session.endTime, timeInBedMinutes = tib,
+                        actualSleepMinutes = actual, awakeMinutes = awakeM,
+                        remMinutes = remM, lightMinutes = lightM, deepMinutes = deepM,
+                        sleepLatencyMinutes = null, avgHeartRateBpm = null,
+                        minHeartRateBpm = null, maxHeartRateBpm = null,
+                        avgRespiratoryRate = null, avgSkinTempDeltaC = null,
+                        stageCount = session.stages.size,
+                        originPackage = session.metadata.dataOrigin.packageName,
+                        stages = emptyList(),
+                    )
+                    SleepNightSummary(
+                        wakeDate = date, bedtime = session.startTime,
+                        wakeTime = session.endTime, timeInBedMinutes = tib,
+                        actualSleepMinutes = actual,
+                        sleepScore = sleepScoreForWeek(detail),
+                        deepMinutes = deepM, remMinutes = remM,
+                        lightMinutes = lightM, awakeMinutes = awakeM,
+                    )
+                }
+            }.reversed()
+        } ?: emptyList()
+
+    /** Sleep score shared by the detail screen and week overview. */
+    fun sleepScoreForWeek(d: SleepDetail): Int {
+        var score = 0
+        val hours = d.actualSleepMinutes / 60.0
+        score += when {
+            hours >= 7 && hours <= 9 -> 30
+            hours >= 6 && hours < 7 -> 22
+            hours > 9 && hours <= 10 -> 22
+            hours >= 5 && hours < 6 -> 14
+            else -> 6
+        }
+        val eff = if (d.timeInBedMinutes > 0)
+            d.actualSleepMinutes.toDouble() / d.timeInBedMinutes else 0.0
+        score += when {
+            eff >= 0.9 -> 25
+            eff >= 0.85 -> 20
+            eff >= 0.8 -> 15
+            eff >= 0.7 -> 10
+            else -> 5
+        }
+        val deepPct = if (d.actualSleepMinutes > 0)
+            d.deepMinutes.toDouble() / d.actualSleepMinutes else 0.0
+        score += when {
+            deepPct in 0.13..0.30 -> 20
+            deepPct in 0.08..0.13 -> 14
+            deepPct > 0.30 -> 14
+            else -> 7
+        }
+        val remPct = if (d.actualSleepMinutes > 0)
+            d.remMinutes.toDouble() / d.actualSleepMinutes else 0.0
+        score += when {
+            remPct in 0.18..0.30 -> 15
+            remPct in 0.12..0.18 -> 10
+            else -> 5
+        }
+        score += when {
+            d.awakeMinutes <= 20 -> 10
+            d.awakeMinutes <= 40 -> 7
+            d.awakeMinutes <= 60 -> 4
+            else -> 2
+        }
+        return score.coerceIn(0, 100)
+    }
+
     suspend fun getSleepDetail(wakeDate: LocalDate): SleepDetail? {
         val now = Instant.now()
         return try {
