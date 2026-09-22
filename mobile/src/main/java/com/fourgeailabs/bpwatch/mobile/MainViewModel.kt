@@ -113,6 +113,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val hcPermissions: Set<String> get() = hc.permissions
     val hcReadPermissions: Set<String> get() = hc.readPermissions
 
+    // v2.4.5: must be declared BEFORE the init block — init calls
+    // refreshDashboard(), which reads _refreshing. (Kotlin runs property
+    // initializers and init blocks in source order.)
+    private val _refreshing = MutableStateFlow(false)
+    /**
+     * True while a dashboard refresh is running. Guards against
+     * overlapping refreshes.
+     */
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
     init {
         refreshHealthConnect()
         refreshLatestWatchHr()
@@ -261,13 +271,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Reactive snore events in [start, end) for the Snore charts. */
     fun observeSnoreEvents(start: Long, end: Long) =
         repo.snoreDao.observeBetween(start, end)
-
-    private val _refreshing = MutableStateFlow(false)
-    /**
-     * True while a dashboard refresh is running (e.g. pull-to-refresh on
-     * Home). Guards against overlapping refreshes.
-     */
-    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
     /**
      * (Re)loads today's Health Connect metrics for the dashboard tiles.

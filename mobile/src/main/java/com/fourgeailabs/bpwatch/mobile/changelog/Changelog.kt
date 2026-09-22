@@ -20,6 +20,14 @@ data class ChangelogEntry(
 /** Newest first. The full history starts at the first public version. */
 val CHANGELOG: List<ChangelogEntry> = listOf(
     ChangelogEntry(
+        versionName = "2.4.5",
+        versionCode = 34,
+        date = "2026-09-22",
+        notes = listOf(
+            "Fixes the launch crash (initialization order bug in the dashboard refresh)",
+        ),
+    ),
+    ChangelogEntry(
         versionName = "2.4.4",
         versionCode = 33,
         date = "2026-09-22",
