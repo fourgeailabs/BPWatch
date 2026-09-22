@@ -20,6 +20,16 @@ data class ChangelogEntry(
 /** Newest first. The full history starts at the first public version. */
 val CHANGELOG: List<ChangelogEntry> = listOf(
     ChangelogEntry(
+        versionName = "2.4.1",
+        versionCode = 30,
+        date = "2026-09-21",
+        notes = listOf(
+            "Home screen decluttered: the readings timeline is gone from " +
+                "Home — your full BP history lives on the History tab, " +
+                "where it belongs.",
+        ),
+    ),
+    ChangelogEntry(
         versionName = "2.4.0",
         versionCode = 29,
         date = "2026-09-21",

@@ -2,7 +2,6 @@ package com.fourgeailabs.bpwatch.mobile.ui
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,8 +63,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -74,15 +71,9 @@ import androidx.compose.ui.unit.dp
 import com.fourgeailabs.bpwatch.mobile.DashboardMetrics
 import com.fourgeailabs.bpwatch.mobile.HealthLogKind
 import com.fourgeailabs.bpwatch.mobile.MainViewModel
-import com.fourgeailabs.bpwatch.mobile.TimelineDay
-import com.fourgeailabs.bpwatch.mobile.TimelineEntry
-import com.fourgeailabs.bpwatch.mobile.TimelineKind
 import com.fourgeailabs.bpwatch.mobile.healthconnect.HealthConnectManager
 import com.fourgeailabs.bpwatch.mobile.wearable.BpCheckState
 import com.fourgeailabs.bpwatch.mobile.wearable.WatchLiveState
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val Navy = Color(0xFF0A1A33)
@@ -90,9 +81,10 @@ private val Crimson = Color(0xFFDC143C)
 private val LiveGreen = Color(0xFF34A853)
 
 /**
- * v2.0 Home: a Google Health-style dashboard. BP estimate stays the hero,
- * below it the day's real metrics as tiles, then a grouped timeline of
- * readings and logs. British spelling throughout, no em dashes in copy.
+ * v2.4.1 Home: a Google Health-style dashboard. BP estimate stays the hero,
+ * below it the day's real metrics as tiles, then snore and calibrate cards.
+ * The readings timeline lives on the History tab, not here.
+ * British spelling throughout, no em dashes in copy.
  */
 @Composable
 fun HomeScreen(
@@ -105,7 +97,6 @@ fun HomeScreen(
 ) {
     val readings by viewModel.readings.collectAsState()
     val dashboard by viewModel.dashboard.collectAsState()
-    val timeline by viewModel.timelineDays.collectAsState()
     var showLogSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.refreshDashboard() }
@@ -326,19 +317,6 @@ fun HomeScreen(
             }
         }
 
-        // --- Timeline.
-        if (timeline.isNotEmpty()) {
-            timeline.forEach { day -> TimelineDayGroup(day) }
-        } else {
-            Text(
-                "Your readings and logs will appear here.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-            )
-        }
-
         Text(
             "BPWatch gives wellness estimates from your own cuff calibration. " +
                 "It is not a medical device. Check with a cuff before making health decisions.",
@@ -498,100 +476,6 @@ private fun RowScope.HealthTile(
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-/** One day group: wavy divider label, then its entries. */
-@Composable
-private fun TimelineDayGroup(day: TimelineDay) {
-    WavyDivider(day.label)
-    day.entries.forEach { entry ->
-        TimelineRow(entry)
-        Spacer(Modifier.height(4.dp))
-    }
-}
-
-@Composable
-private fun TimelineRow(entry: TimelineEntry) {
-    val icon = when (entry.kind) {
-        TimelineKind.BP -> Icons.Filled.MonitorHeart
-        TimelineKind.WEIGHT -> Icons.Filled.MonitorWeight
-        TimelineKind.HYDRATION -> Icons.Filled.WaterDrop
-        TimelineKind.FOOD -> Icons.Filled.Restaurant
-    }
-    val time = remember(entry.timestamp) {
-        DateTimeFormatter.ofPattern("h:mm a")
-            .withZone(ZoneId.systemDefault())
-            .format(Instant.ofEpochMilli(entry.timestamp))
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TintedIcon(icon, contentDescription = null, size = 42.dp)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                time,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(entry.title, style = MaterialTheme.typography.titleSmall)
-            Text(
-                entry.detail,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/** Labelled wavy divider, in the spirit of the reference timeline. */
-@Composable
-private fun WavyDivider(label: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        WavyLine(Modifier.weight(1f))
-        Text(
-            label,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp),
-        )
-        WavyLine(Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun WavyLine(modifier: Modifier = Modifier) {
-    val color = MaterialTheme.colorScheme.onSurfaceVariant
-    Canvas(modifier = modifier.height(12.dp)) {
-        val w = size.width
-        val h = size.height
-        val amplitude = h * 0.35f
-        val wavelength = 30f
-        val path = Path().apply {
-            moveTo(0f, h / 2)
-            var x = 0f
-            while (x < w) {
-                quadraticBezierTo(
-                    x + wavelength / 4, h / 2 - amplitude,
-                    x + wavelength / 2, h / 2,
-                )
-                quadraticBezierTo(
-                    x + wavelength * 3 / 4, h / 2 + amplitude,
-                    x + wavelength, h / 2,
-                )
-                x += wavelength
-            }
-        }
-        drawPath(path, color.copy(alpha = 0.55f), style = Stroke(width = 2f))
     }
 }
 
