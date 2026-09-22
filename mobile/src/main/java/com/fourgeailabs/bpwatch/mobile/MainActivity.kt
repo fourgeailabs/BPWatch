@@ -72,6 +72,7 @@ import com.fourgeailabs.bpwatch.mobile.ui.HomeScreen
 import com.fourgeailabs.bpwatch.mobile.ui.MonitoringSettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SettingsScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SleepSettingsScreen
+import com.fourgeailabs.bpwatch.mobile.ui.SleepDetailScreen
 import com.fourgeailabs.bpwatch.mobile.ui.SnoreScreen
 import com.fourgeailabs.bpwatch.mobile.ui.TrendMetric
 import com.fourgeailabs.bpwatch.mobile.ui.TrendsScreen
@@ -418,6 +419,9 @@ private fun BpWatchPhoneApp(
                     onOpenSettings = { goTo(3) },
                     onOpenTrends = { metric -> trendsInitial = metric; goTo(1) },
                     onOpenSnore = { goTo(5) },
+                    // v2.4.6: Sleep shortcut replaces the redundant Start button.
+                    // Opens the sleep detail screen, not settings.
+                    onOpenSleep = { goTo(13) },
                 )
                 1 -> TrendsScreen(
                     viewModel,
@@ -453,6 +457,12 @@ private fun BpWatchPhoneApp(
                     onRequestMicPermission,
                     // v2.3.2: sleep diagnostic card in the Sleep section.
                     onDiagnoseSleep = { viewModel.diagnoseSleep() },
+                )
+                // v2.4.6: sleep detail screen (hypnogram, stages, metrics).
+                13 -> SleepDetailScreen(
+                    viewModel,
+                    onBack = { goTo(0) },
+                    onOpenSnore = { goTo(5) },
                 )
             }
         }

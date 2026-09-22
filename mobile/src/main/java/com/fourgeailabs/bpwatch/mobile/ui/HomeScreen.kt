@@ -117,6 +117,7 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenTrends: (TrendMetric) -> Unit,
     onOpenSnore: () -> Unit,
+    onOpenSleep: () -> Unit,
 ) {
     val readings by viewModel.readings.collectAsState()
     val dashboard by viewModel.dashboard.collectAsState()
@@ -128,6 +129,8 @@ fun HomeScreen(
     val sys = latest?.sysEstimate ?: latest?.sysCuff
     val dia = latest?.diaEstimate ?: latest?.diaCuff
     val estimated = latest?.sysEstimate != null
+    // v2.4.6: HR captured at the time of the BP recording.
+    val bpHrBpm = latest?.heartRate?.takeIf { it > 0f }?.toInt()
     // v2.3 phone-triggered BP check state.
     val bpStatus by BpCheckState.status.collectAsState()
     // v2.4.2: the screen stays on while a check is measuring.
@@ -191,6 +194,15 @@ fun HomeScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.7f),
                         )
+                        // v2.4.6: HR captured at the time of the BP recording.
+                        if (bpHrBpm != null) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "$bpHrBpm bpm · at recording",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Crimson.copy(alpha = 0.9f),
+                            )
+                        }
                         // v2.3 phone-triggered BP check: asks the watch to sample
                         // now, over the Data Layer. v2.4.2: while measuring, the
                         // hero shows the same beating heart wrapped in a
@@ -263,12 +275,12 @@ fun HomeScreen(
                     Text("Log")
                 }
                 Button(
-                    onClick = onOpenWatch,
+                    onClick = onOpenSleep,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Icon(Icons.Filled.DirectionsRun, contentDescription = null)
+                    Icon(Icons.Filled.Bedtime, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
-                    Text("Start")
+                    Text("Sleep")
                 }
             }
 

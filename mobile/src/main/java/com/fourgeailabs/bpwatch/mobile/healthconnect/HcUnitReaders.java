@@ -5,6 +5,8 @@ import androidx.health.connect.client.units.Length;
 import androidx.health.connect.client.units.Mass;
 import androidx.health.connect.client.units.Percentage;
 import androidx.health.connect.client.units.Power;
+import androidx.health.connect.client.units.Temperature;
+import androidx.health.connect.client.units.TemperatureDelta;
 import androidx.health.connect.client.units.Volume;
 
 /**
@@ -45,5 +47,13 @@ public final class HcUnitReaders {
 
     public static double watts(Power power) {
         return power.getWatts();
+    }
+
+    public static double celsius(Temperature temperature) {
+        return temperature.getCelsius();
+    }
+
+    public static double celsiusDelta(TemperatureDelta delta) {
+        return delta.getCelsius();
     }
 }

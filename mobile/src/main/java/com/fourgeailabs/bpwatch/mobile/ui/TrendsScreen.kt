@@ -106,6 +106,9 @@ private enum class TrendRange(val label: String, val millis: Long) {
     WEEK("Week", 7L * 24L * 3600_000L),
     MONTH("Month", 30L * 24L * 3600_000L),
     YEAR("Year", 365L * 24L * 3600_000L),
+    // v2.4.6: full history backfill — queries from the beginning of the
+    // Health Connect record. millis is unused for ALL (start = epoch bound).
+    ALL("All", -1L),
 }
 
 private data class ChartPoint(val x: Long, val y: Float)
@@ -153,7 +156,15 @@ fun TrendsScreen(
 
     // v2.3.2: a manual refresh also re-anchors the window to now.
     val now = remember(range, refreshTick) { System.currentTimeMillis() }
-    val start = now - range.millis
+    // v2.4.6: ALL range starts at the history epoch (2015) so Health Connect
+    // returns everything it holds — full backfill from the beginning.
+    val start = if (range == TrendRange.ALL) {
+        java.time.LocalDate.of(2015, 1, 1)
+            .atStartOfDay(java.time.ZoneId.systemDefault())
+            .toInstant().toEpochMilli()
+    } else {
+        now - range.millis
+    }
 
     val hrSamples by remember(range, refreshTick) {
         viewModel.observeHrRange(start, now)
@@ -555,7 +566,7 @@ private fun TrendChart(
             TrendRange.HOUR, TrendRange.DAY -> DateTimeFormatter.ofPattern("ha")
             TrendRange.WEEK -> DateTimeFormatter.ofPattern("EEE")
             TrendRange.MONTH -> DateTimeFormatter.ofPattern("d MMM")
-            TrendRange.YEAR -> DateTimeFormatter.ofPattern("MMM")
+            TrendRange.YEAR, TrendRange.ALL -> DateTimeFormatter.ofPattern("MMM yy")
         }.withZone(zone)
     }
 

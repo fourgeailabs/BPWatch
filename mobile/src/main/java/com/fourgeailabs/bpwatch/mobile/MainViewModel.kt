@@ -684,6 +684,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun diagnoseSleep(): SleepDiagnosis = hc.diagnoseSleep()
 
+    /** v2.4.6: detailed sleep for one night (by wake date) for the sleep detail screen. */
+    suspend fun getSleepDetail(wakeDate: java.time.LocalDate) =
+        hc.getSleepDetail(wakeDate)
+
     private fun timeAgo(instant: java.time.Instant): String {
         val mins = java.time.Duration.between(instant, java.time.Instant.now())
             .toMinutes().coerceAtLeast(0)

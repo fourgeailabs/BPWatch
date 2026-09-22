@@ -20,6 +20,17 @@ data class ChangelogEntry(
 /** Newest first. The full history starts at the first public version. */
 val CHANGELOG: List<ChangelogEntry> = listOf(
     ChangelogEntry(
+        versionName = "2.4.6",
+        versionCode = 35,
+        date = "2026-09-22",
+        notes = listOf(
+            "BP card now shows your heart rate at the time of the reading",
+            "New Sleep button on Home opens the full sleep detail view",
+            "Sleep detail: score, stages chart, HR, breathing rate, skin temperature, snoring",
+            "Tap any sleep factor for its full breakdown",
+        ),
+    ),
+    ChangelogEntry(
         versionName = "2.4.5",
         versionCode = 34,
         date = "2026-09-22",

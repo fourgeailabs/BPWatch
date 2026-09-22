@@ -26,6 +26,7 @@ import androidx.health.connect.client.records.NutritionRecord
 import androidx.health.connect.client.records.RespiratoryRateRecord
 import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SleepSessionRecord
+import androidx.health.connect.client.records.SkinTemperatureRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.Vo2MaxRecord
@@ -59,6 +60,30 @@ import kotlinx.coroutines.withTimeoutOrNull
 class HealthConnectManager(private val context: Context) {
 
     private val client by lazy { HealthConnectClient.getOrCreate(context) }
+
+    /**
+     * v2.4.6: read ALL records of a type in a range, following page tokens.
+     * Health Connect pages at ~1000 records; without this, full-history
+     * backfill silently truncates. Caps at 20 pages as a safety valve.
+     */
+    private suspend inline fun <reified T : androidx.health.connect.client.records.Record> readAllRecords(
+        filter: TimeRangeFilter,
+    ): List<T> {
+        val out = mutableListOf<T>()
+        var pageToken: String? = null
+        repeat(20) {
+            val req = ReadRecordsRequest(
+                recordType = T::class,
+                timeRangeFilter = filter,
+                pageToken = pageToken,
+            )
+            val resp = client.readRecords(req)
+            out += resp.records
+            pageToken = resp.pageToken
+            if (pageToken == null) return out
+        }
+        return out
+    }
 
     /**
      * Never throws: a Health Connect hiccup must not take the app down.
@@ -113,6 +138,8 @@ class HealthConnectManager(private val context: Context) {
         HealthPermission.getReadPermission(BasalMetabolicRateRecord::class),
         HealthPermission.getReadPermission(FloorsClimbedRecord::class),
         HealthPermission.getReadPermission(LeanBodyMassRecord::class),
+        // v2.4.6: skin temperature for the sleep detail screen.
+        HealthPermission.getReadPermission(SkinTemperatureRecord::class),
     )
 
     /**
@@ -318,12 +345,8 @@ class HealthConnectManager(private val context: Context) {
                     ?.let { HcUnitReaders.liters(it).toFloat() }
             }
             HcTrendMetric.WEIGHT -> {
-                val records = client.readRecords(
-                    ReadRecordsRequest(
-                        recordType = WeightRecord::class,
-                        timeRangeFilter = filter,
-                    )
-                ).records
+                // v2.4.6: paginated full-history read for backfill.
+                val records = readAllRecords<WeightRecord>(filter)
                 records.groupBy { bucketStart(it.time, start, slicer) }
                     .mapNotNull { (bucket, rs) ->
                         rs.maxByOrNull { it.time }?.weight?.let { w ->
@@ -336,12 +359,8 @@ class HealthConnectManager(private val context: Context) {
                     .sortedBy { it.timestamp }
             }
             HcTrendMetric.SLEEP -> {
-                val records = client.readRecords(
-                    ReadRecordsRequest(
-                        recordType = SleepSessionRecord::class,
-                        timeRangeFilter = filter,
-                    )
-                ).records
+                // v2.4.6: paginated full-history read for backfill.
+                val records = readAllRecords<SleepSessionRecord>(filter)
                 // v2.3 sleep audit: each session counts toward the local
                 // calendar day its end falls on (the morning you woke up).
                 // Range-aligned 24h buckets could split one morning's
@@ -366,12 +385,8 @@ class HealthConnectManager(private val context: Context) {
             }
             // v2.2: latest reading per bucket (same shape as WEIGHT).
             HcTrendMetric.RESTING_HR -> {
-                val records = client.readRecords(
-                    ReadRecordsRequest(
-                        recordType = RestingHeartRateRecord::class,
-                        timeRangeFilter = filter,
-                    )
-                ).records
+                // v2.4.6: paginated full-history read for backfill.
+                val records = readAllRecords<RestingHeartRateRecord>(filter)
                 records.groupBy { bucketStart(it.time, start, slicer) }
                     .mapNotNull { (bucket, rs) ->
                         rs.maxByOrNull { it.time }?.let { r ->
@@ -382,12 +397,8 @@ class HealthConnectManager(private val context: Context) {
                     .sortedBy { it.timestamp }
             }
             HcTrendMetric.HRV -> {
-                val records = client.readRecords(
-                    ReadRecordsRequest(
-                        recordType = HeartRateVariabilityRmssdRecord::class,
-                        timeRangeFilter = filter,
-                    )
-                ).records
+                // v2.4.6: paginated full-history read for backfill.
+                val records = readAllRecords<HeartRateVariabilityRmssdRecord>(filter)
                 records.groupBy { bucketStart(it.time, start, slicer) }
                     .mapNotNull { (bucket, rs) ->
                         rs.maxByOrNull { it.time }?.let { r ->
@@ -398,12 +409,8 @@ class HealthConnectManager(private val context: Context) {
                     .sortedBy { it.timestamp }
             }
             HcTrendMetric.BODY_FAT -> {
-                val records = client.readRecords(
-                    ReadRecordsRequest(
-                        recordType = BodyFatRecord::class,
-                        timeRangeFilter = filter,
-                    )
-                ).records
+                // v2.4.6: paginated full-history read for backfill.
+                val records = readAllRecords<BodyFatRecord>(filter)
                 records.groupBy { bucketStart(it.time, start, slicer) }
                     .mapNotNull { (bucket, rs) ->
                         rs.maxByOrNull { it.time }?.percentage?.let { pct ->
@@ -557,6 +564,120 @@ class HealthConnectManager(private val context: Context) {
         )
     }
 
+    /**
+     * v2.4.6: detailed sleep data for one night (by wake date), for the sleep
+     * detail screen. Returns null when Health Connect has no session ending
+     * on that date. Reads stages, HR, respiratory rate and skin temperature
+     * within the session window. v2.4.6: searches full history (not just 14d)
+     * so older nights are reachable.
+     */
+    suspend fun getSleepDetail(wakeDate: LocalDate): SleepDetail? {
+        val now = Instant.now()
+        return try {
+            withTimeoutOrNull(HC_QUERY_TIMEOUT_MS) {
+                // Find the session ending on the requested wake date.
+                // v2.4.6: search from the beginning of the record so any
+                // browsable date resolves, not just the last fortnight.
+                val sessions = readAllRecords<SleepSessionRecord>(
+                    TimeRangeFilter.between(HISTORY_EPOCH, now),
+                ).filter { wakeDate(it) == wakeDate }
+                val session = sessions.maxByOrNull { it.endTime } ?: return@withTimeoutOrNull null
+
+                val start = session.startTime
+                val end = session.endTime
+                val range = TimeRangeFilter.between(start, end)
+
+                // Stage breakdown in minutes.
+                val stageMinutes = mutableMapOf<Int, Long>()
+                for (stage in session.stages) {
+                    val mins = ChronoUnit.MINUTES.between(stage.startTime, stage.endTime)
+                    stageMinutes[stage.stage] = (stageMinutes[stage.stage] ?: 0L) + mins
+                }
+
+                // Average HR during sleep.
+                val hrRecords = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = HeartRateRecord::class,
+                        timeRangeFilter = range,
+                    )
+                ).records
+                val hrSamples = hrRecords.flatMap { it.samples }.mapNotNull {
+                    it.beatsPerMinute.takeIf { bpm -> bpm > 0 }
+                }
+                val avgHr = hrSamples.average().takeIf { hrSamples.isNotEmpty() }
+                val minHr = hrSamples.minOrNull()?.toDouble()
+                val maxHr = hrSamples.maxOrNull()?.toDouble()
+
+                // Average respiratory rate during sleep.
+                val rrRecords = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = RespiratoryRateRecord::class,
+                        timeRangeFilter = range,
+                    )
+                ).records
+                val rrValues = rrRecords.mapNotNull {
+                    it.rate.takeIf { r -> r > 0 }
+                }
+                val avgRr = rrValues.average().takeIf { rrValues.isNotEmpty() }
+
+                // Skin temperature during sleep.
+                val skinRecords = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = SkinTemperatureRecord::class,
+                        timeRangeFilter = range,
+                    )
+                ).records
+                val skinTemps = skinRecords.flatMap { it.deltas }.mapNotNull { delta ->
+                    HcUnitReaders.celsiusDelta(delta.delta).takeIf { it.isFinite() }
+                }
+                val avgSkinDelta = skinTemps.average().takeIf { skinTemps.isNotEmpty() }
+
+                // v2.4.6: sleep latency = session start to first sleep stage.
+                val sortedStages = session.stages.sortedBy { it.startTime }
+                val firstSleep = sortedStages.firstOrNull {
+                    it.stage != SleepSessionRecord.STAGE_TYPE_AWAKE &&
+                            it.stage != SleepSessionRecord.STAGE_TYPE_UNKNOWN &&
+                            it.stage != SleepSessionRecord.STAGE_TYPE_OUT_OF_BED
+                }
+                val latencyMinutes = firstSleep?.let {
+                    ChronoUnit.MINUTES.between(start, it.startTime).coerceAtLeast(0L)
+                }
+
+                SleepDetail(
+                    wakeDate = wakeDate,
+                    sessionStart = start,
+                    sessionEnd = end,
+                    timeInBedMinutes = ChronoUnit.MINUTES.between(start, end),
+                    actualSleepMinutes = sleepMinutes(session),
+                    awakeMinutes = stageMinutes[SleepSessionRecord.STAGE_TYPE_AWAKE] ?: 0L,
+                    remMinutes = stageMinutes[SleepSessionRecord.STAGE_TYPE_REM] ?: 0L,
+                    lightMinutes = (stageMinutes[SleepSessionRecord.STAGE_TYPE_LIGHT] ?: 0L) +
+                            (stageMinutes[SleepSessionRecord.STAGE_TYPE_UNKNOWN] ?: 0L),
+                    deepMinutes = stageMinutes[SleepSessionRecord.STAGE_TYPE_DEEP] ?: 0L,
+                    sleepLatencyMinutes = latencyMinutes,
+                    avgHeartRateBpm = avgHr,
+                    minHeartRateBpm = minHr,
+                    maxHeartRateBpm = maxHr,
+                    avgRespiratoryRate = avgRr,
+                    avgSkinTempDeltaC = avgSkinDelta,
+                    stageCount = session.stages.size,
+                    originPackage = session.metadata.dataOrigin.packageName,
+                    stages = session.stages.map {
+                        SleepStageSegment(
+                            start = it.startTime,
+                            end = it.endTime,
+                            stage = it.stage,
+                        )
+                    },
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Logs a hydration entry to Health Connect. Throws on failure. */
     suspend fun writeHydration(liters: Double, time: Instant) {
         val zoneOffset = ZoneId.systemDefault().rules.getOffset(time)
@@ -619,6 +740,14 @@ class HealthConnectManager(private val context: Context) {
 
         /** Trend range queries can span a year of buckets — allow longer. */
         private const val HC_TREND_TIMEOUT_MS = 30_000L
+
+        /**
+         * v2.4.6: earliest date we ever query from for "all history" backfill.
+         * Health Connect only returns what it holds; this is just the lower
+         * bound so we don't miss anything.
+         */
+        private val HISTORY_EPOCH: Instant =
+            LocalDate.of(2015, 1, 1).atStartOfDay(ZoneId.systemDefault()).toInstant()
 
         /** True when the Health Connect app / system component can handle intents. */
         fun isHealthConnectInstalled(context: Context): Boolean {
@@ -775,4 +904,37 @@ data class TodayMetrics(
     val weightKg: Double? = null,
     val sleepHours: Double? = null,
     val hydrationLiters: Double? = null,
+)
+
+/** v2.4.6: one sleep stage segment for the hypnogram chart. */
+data class SleepStageSegment(
+    val start: java.time.Instant,
+    val end: java.time.Instant,
+    /** One of SleepSessionRecord.STAGE_TYPE_* constants. */
+    val stage: Int,
+)
+
+/**
+ * v2.4.6: detailed sleep data for one night, powering the sleep detail
+ * screen. Null fields mean Health Connect had no data for that metric.
+ */
+data class SleepDetail(
+    val wakeDate: java.time.LocalDate,
+    val sessionStart: java.time.Instant,
+    val sessionEnd: java.time.Instant,
+    val timeInBedMinutes: Long,
+    val actualSleepMinutes: Long,
+    val awakeMinutes: Long,
+    val remMinutes: Long,
+    val lightMinutes: Long,
+    val deepMinutes: Long,
+    val sleepLatencyMinutes: Long?,
+    val avgHeartRateBpm: Double?,
+    val minHeartRateBpm: Double?,
+    val maxHeartRateBpm: Double?,
+    val avgRespiratoryRate: Double?,
+    val avgSkinTempDeltaC: Double?,
+    val stageCount: Int,
+    val originPackage: String?,
+    val stages: List<SleepStageSegment>,
 )
