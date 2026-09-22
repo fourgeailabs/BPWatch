@@ -20,6 +20,14 @@ data class ChangelogEntry(
 /** Newest first. The full history starts at the first public version. */
 val CHANGELOG: List<ChangelogEntry> = listOf(
     ChangelogEntry(
+        versionName = "2.4.3",
+        versionCode = 32,
+        date = "2026-09-22",
+        notes = listOf(
+            "Watch screen stays on while the app is open",
+        ),
+    ),
+    ChangelogEntry(
         versionName = "2.4.2",
         versionCode = 31,
         date = "2026-09-22",

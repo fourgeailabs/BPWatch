@@ -3,6 +3,7 @@ package com.fourgeailabs.bpwatch.wear
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -70,6 +71,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // v2.4.3: the watch screen stays on while the app is open. The flag
+        // only applies while this window is visible, so it clears itself the
+        // moment the app goes to the background — no battery drain from here.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // Estimates can arrive while the UI process is dead (scheduled checks).
         WatchState.restoreFromPrefs(this)
         // Alarms don't survive app updates — re-arm if needed.
