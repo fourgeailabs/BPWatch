@@ -14,9 +14,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -28,6 +36,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,6 +112,21 @@ class MainActivity : ComponentActivity() {
         installCrashRecorder()
         ensureNotificationPermission()
         val lastCrashReport = readCrashReport()
+        // v2.4.4: if the last launch crashed, show ONLY the crash report.
+        // No ViewModel, no HomeScreen, no database — this screen cannot
+        // crash, so the report is always visible and copyable. This is the
+        // diagnostic that reveals the v2.4.2/v2.4.3 launch crash.
+        if (lastCrashReport != null) {
+            setContent {
+                BpWatchTheme {
+                    CrashReportScreen(
+                        report = lastCrashReport,
+                        onDismiss = { recreate() },
+                    )
+                }
+            }
+            return
+        }
         setContent {
             BpWatchTheme {
                 BpWatchPhoneApp(
@@ -429,6 +454,69 @@ private fun BpWatchPhoneApp(
                     // v2.3.2: sleep diagnostic card in the Sleep section.
                     onDiagnoseSleep = { viewModel.diagnoseSleep() },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * v2.4.4: shown INSTEAD of the whole app when the previous launch crashed.
+ * Deliberately trivial — no ViewModel, no database, no Health Connect, no
+ * HomeScreen — so it cannot crash itself. The report is always visible and
+ * copyable, which is how the v2.4.2/v2.4.3 launch crash gets diagnosed.
+ */
+@Composable
+private fun CrashReportScreen(
+    report: String,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            "The app crashed last time",
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Text(
+            "Copy the report below and send it to The Doctor so he can fix it. " +
+                "Then tap Try again.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            report,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Button(
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as ClipboardManager
+                    clipboard.setPrimaryClip(
+                        ClipData.newPlainText("BPWatch crash", report)
+                    )
+                    Toast.makeText(context, "Crash report copied", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Copy report")
+            }
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Try again")
             }
         }
     }

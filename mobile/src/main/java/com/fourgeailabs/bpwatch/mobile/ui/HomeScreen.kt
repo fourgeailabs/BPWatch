@@ -57,7 +57,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -131,16 +130,12 @@ fun HomeScreen(
     val estimated = latest?.sysEstimate != null
     // v2.3 phone-triggered BP check state.
     val bpStatus by BpCheckState.status.collectAsState()
-    val refreshing by viewModel.refreshing.collectAsState()
     // v2.4.2: the screen stays on while a check is measuring.
     KeepScreenAwakeWhileMeasuring(bpStatus is BpCheckState.Status.Measuring)
 
-    // v2.4.2: pull down anywhere on Home to refresh the tiles.
-    PullToRefreshBox(
-        isRefreshing = refreshing,
-        onRefresh = { viewModel.refreshDashboard() },
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+    // v2.4.4: pull-to-refresh temporarily removed while the v2.4.2/v2.4.3
+    // launch crash is diagnosed. Plain scrollable column; the dashboard
+    // still refreshes on launch via the LaunchedEffect below.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -318,7 +313,6 @@ fun HomeScreen(
                 modifier = Modifier.padding(vertical = 4.dp),
             )
         }
-    }
 
     if (showLogSheet) {
         LogSheet(
