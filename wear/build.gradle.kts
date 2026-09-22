@@ -13,8 +13,8 @@ android {
         minSdk = 30 // Wear OS 3+
         targetSdk = 34
         // Kept in sync with :mobile (see its versioning policy comment).
-        versionCode = 30
-        versionName = "2.4.1"
+        versionCode = 31
+        versionName = "2.4.2"
     }
 
     buildTypes {
@@ -63,4 +63,7 @@ dependencies {
     // NOT pulled transitively — hence the explicit second line.
     implementation("androidx.wear.watchface:watchface-complications-data-source:1.2.1")
     implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.1")
+    // Wear OS Tile: the swipeable "latest BP + time" card (v2.4.2).
+    implementation("androidx.wear.tiles:tiles:1.4.1")
+    implementation("com.google.guava:listenablefuture:1.0")
 }

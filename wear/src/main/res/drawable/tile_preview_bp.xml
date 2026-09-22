@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tile carousel preview (v2.4.2): dark tile with the BPWatch heart mark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <path
+        android:fillColor="#0A1628"
+        android:pathData="M0,0h200v200h-200z" />
+    <path
+        android:fillColor="#C62828"
+        android:pathData="M100,52c-10,-15 -35,-15 -43,3c-8,18 10,36 43,61c33,-25 51,-43 43,-61c-8,-18 -33,-18 -43,-3z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M62,100h20l8,-16l12,32l8,-16h28" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M70,150a8,8 0 1,0 0.1,0zM92,150a8,8 0 1,0 0.1,0zM114,150a8,8 0 1,0 0.1,0z" />
+</vector>

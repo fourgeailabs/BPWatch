@@ -165,5 +165,20 @@
                 android:name="androidx.wear.watchface.complications.datasource.SUPPORTED_TYPES"
                 android:value="SHORT_TEXT" />
         </service>
+
+        <!-- Wear OS Tile (v2.4.2): the swipeable "latest BP + time" card. -->
+        <service
+            android:name="com.fourgeailabs.bpwatch.wear.BpTileService"
+            android:label="@string/tile_bp_label"
+            android:description="@string/tile_bp_description"
+            android:icon="@mipmap/ic_launcher"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_preview_bp" />
+        </service>
     </application>
 </manifest>

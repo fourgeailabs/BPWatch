@@ -388,7 +388,6 @@ private fun BpWatchPhoneApp(
             when (selected) {
                 0 -> HomeScreen(
                     viewModel,
-                    onOpenCalibrate = { goTo(4) },
                     // v2.4.0: Watch lives in Settings now, not the bottom bar.
                     onOpenWatch = { goTo(8) },
                     onOpenSettings = { goTo(3) },
@@ -420,7 +419,7 @@ private fun BpWatchPhoneApp(
                 5 -> SnoreScreen(viewModel)
                 6 -> AboutScreen()
                 7 -> ChangelogScreen()
-                8 -> WatchInstallScreen()
+                8 -> WatchInstallScreen(onOpenCalibrate = { goTo(4) })
                 9 -> BodyProfileSettingsScreen(viewModel)
                 10 -> ConnectionsSettingsScreen(viewModel, onRequestHcPermissions)
                 11 -> MonitoringSettingsScreen(viewModel)

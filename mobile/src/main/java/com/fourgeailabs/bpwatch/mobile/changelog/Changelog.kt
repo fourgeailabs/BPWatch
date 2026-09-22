@@ -20,6 +20,27 @@ data class ChangelogEntry(
 /** Newest first. The full history starts at the first public version. */
 val CHANGELOG: List<ChangelogEntry> = listOf(
     ChangelogEntry(
+        versionName = "2.4.2",
+        versionCode = 31,
+        date = "2026-09-22",
+        notes = listOf(
+            "Pull down on Home to refresh all the tiles.",
+            "Starting a BP check from the phone now shows the same " +
+                "beating heart wrapped in the shifting colour ring as " +
+                "the watch while it measures.",
+            "Snoring gets a proper card on Home: last night's episode " +
+                "count and total minutes, plus a 7-night bar chart.",
+            "Calibrate moved off Home into Settings, in the Watch app " +
+                "section where it belongs.",
+            "The phone screen now stays on while a BP check is " +
+                "measuring, so you can watch the heartbeat.",
+            "New watch Tile: swipe to the BPWatch card for the latest " +
+                "reading and the time it was taken; tap it to open the app.",
+            "Watch-face complications now open the app when tapped, " +
+                "and the BP complication carries the reading's time.",
+        ),
+    ),
+    ChangelogEntry(
         versionName = "2.4.1",
         versionCode = 30,
         date = "2026-09-21",

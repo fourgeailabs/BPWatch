@@ -45,6 +45,7 @@ import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -261,101 +262,119 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun observeSnoreEvents(start: Long, end: Long) =
         repo.snoreDao.observeBetween(start, end)
 
+    private val _refreshing = MutableStateFlow(false)
+    /**
+     * True while a dashboard refresh is running (e.g. pull-to-refresh on
+     * Home). Guards against overlapping refreshes.
+     */
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
     /**
      * (Re)loads today's Health Connect metrics for the dashboard tiles.
      * Safe to call often: failures just leave the previous values in place.
      */
     fun refreshDashboard() {
         viewModelScope.launch {
-            // v2.3 Home snoring card: last night's 22:00–07:00 snore count.
-            // Room-local, so it loads whether or not Health Connect is set up.
-            lastNightSnoreCount = try {
-                val (nightStart, nightEnd) = SnoreScheduler.lastNightWindow()
-                AppDatabase.get(getApplication()).snoreDao()
-                    .countBetween(nightStart, nightEnd)
-            } catch (_: Exception) {
-                null
+            if (_refreshing.value) return@launch
+            _refreshing.value = true
+            try {
+                refreshDashboardNow()
+            } finally {
+                _refreshing.value = false
             }
-            val readGranted = try {
-                hc.isAvailable && hc.hasDashboardReads()
-            } catch (_: Exception) {
-                false
-            }
-            if (!readGranted) {
-                _dashboard.value = DashboardMetrics(hcReadGranted = false)
-                return@launch
-            }
-            val t: TodayMetrics? = try {
-                hc.readTodayMetrics()
-            } catch (_: Exception) {
-                null
-            }
-            // v2.3.1: the watch's own step count for today, used as a fallback
-            // when Health Connect has no merged steps to offer.
-            val watchStepsToday = try {
-                val today = java.time.LocalDate.now(java.time.ZoneId.systemDefault())
-                    .format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
-                AppDatabase.get(getApplication()).watchStepsDao().stepsForDate(today)
-            } catch (_: Exception) {
-                null
-            }
-            // v2.2 BMI: profile height + latest weight (Health Connect first,
-            // profile fallback). Nothing faked — null when either is missing.
-            val profile = userProfile.value
-            val heightCm = profile.heightCm
-            val weightKg = t?.weightKg ?: profile.weightKg?.toDouble()
-            val bmi = if (heightCm != null && heightCm > 0f &&
-                weightKg != null && weightKg > 0
-            ) {
-                val m = heightCm / 100.0
-                weightKg / (m * m)
-            } else {
-                null
-            }
-            val bmiLabel = when {
-                bmi == null -> null
-                bmi < 18.5 -> "Underweight"
-                bmi < 25.0 -> "Healthy"
-                bmi < 30.0 -> "Overweight"
-                else -> "Obese"
-            }
-            // v2.3 Home stress tile: the newest available score between the
-            // recorded stress samples and the newest stress-bearing Reading.
-            // Nothing faked — null when both are empty.
-            val stress = try {
-                val db = AppDatabase.get(getApplication())
-                val sample = db.sampleDao().latestStressSample()
-                val reading = db.readingDao().latestStressReading()
-                when {
-                    sample == null && reading == null -> null
-                    reading == null -> sample?.score
-                    sample == null -> reading.stress
-                    else -> if (sample.timestamp >= reading.timestamp) {
-                        sample.score
-                    } else {
-                        reading.stress
-                    }
-                }
-            } catch (_: Exception) {
-                null
-            }
-            _dashboard.value = DashboardMetrics(
-                // v2.3.1: prefer Health Connect's merged cross-device steps
-                // (phone + watch, matches Samsung Health); the watch-only
-                // count is the fallback.
-                steps = t?.steps ?: watchStepsToday,
-                distanceMi = t?.distanceMeters?.let { it / 1609.344 },
-                caloriesKcal = t?.caloriesKcal,
-                heartRateBpm = t?.heartRateBpm?.toInt(),
-                weightLb = t?.weightKg?.let { it * 2.20462 },
-                sleepHours = t?.sleepHours,
-                hydrationMl = t?.hydrationLiters?.let { it * 1000.0 },
-                stress = stress,
-                bmi = bmi,
-                bmiLabel = bmiLabel,
-                hcReadGranted = true,
-            )
         }
+    }
+
+    /** The actual reload behind [refreshDashboard]; runs inside a coroutine. */
+    private suspend fun refreshDashboardNow() {
+        // v2.3 Home snoring card: last night's 22:00–07:00 snore count.
+        // Room-local, so it loads whether or not Health Connect is set up.
+        lastNightSnoreCount = try {
+            val (nightStart, nightEnd) = SnoreScheduler.lastNightWindow()
+            AppDatabase.get(getApplication()).snoreDao()
+                .countBetween(nightStart, nightEnd)
+        } catch (_: Exception) {
+            null
+        }
+        val readGranted = try {
+            hc.isAvailable && hc.hasDashboardReads()
+        } catch (_: Exception) {
+            false
+        }
+        if (!readGranted) {
+            _dashboard.value = DashboardMetrics(hcReadGranted = false)
+            return
+        }
+        val t: TodayMetrics? = try {
+            hc.readTodayMetrics()
+        } catch (_: Exception) {
+            null
+        }
+        // v2.3.1: the watch's own step count for today, used as a fallback
+        // when Health Connect has no merged steps to offer.
+        val watchStepsToday = try {
+            val today = java.time.LocalDate.now(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+            AppDatabase.get(getApplication()).watchStepsDao().stepsForDate(today)
+        } catch (_: Exception) {
+            null
+        }
+        // v2.2 BMI: profile height + latest weight (Health Connect first,
+        // profile fallback). Nothing faked — null when either is missing.
+        val profile = userProfile.value
+        val heightCm = profile.heightCm
+        val weightKg = t?.weightKg ?: profile.weightKg?.toDouble()
+        val bmi = if (heightCm != null && heightCm > 0f &&
+            weightKg != null && weightKg > 0
+        ) {
+            val m = heightCm / 100.0
+            weightKg / (m * m)
+        } else {
+            null
+        }
+        val bmiLabel = when {
+            bmi == null -> null
+            bmi < 18.5 -> "Underweight"
+            bmi < 25.0 -> "Healthy"
+            bmi < 30.0 -> "Overweight"
+            else -> "Obese"
+        }
+        // v2.3 Home stress tile: the newest available score between the
+        // recorded stress samples and the newest stress-bearing Reading.
+        // Nothing faked — null when both are empty.
+        val stress = try {
+            val db = AppDatabase.get(getApplication())
+            val sample = db.sampleDao().latestStressSample()
+            val reading = db.readingDao().latestStressReading()
+            when {
+                sample == null && reading == null -> null
+                reading == null -> sample?.score
+                sample == null -> reading.stress
+                else -> if (sample.timestamp >= reading.timestamp) {
+                    sample.score
+                } else {
+                    reading.stress
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+        _dashboard.value = DashboardMetrics(
+            // v2.3.1: prefer Health Connect's merged cross-device steps
+            // (phone + watch, matches Samsung Health); the watch-only
+            // count is the fallback.
+            steps = t?.steps ?: watchStepsToday,
+            distanceMi = t?.distanceMeters?.let { it / 1609.344 },
+            caloriesKcal = t?.caloriesKcal,
+            heartRateBpm = t?.heartRateBpm?.toInt(),
+            weightLb = t?.weightKg?.let { it * 2.20462 },
+            sleepHours = t?.sleepHours,
+            hydrationMl = t?.hydrationLiters?.let { it * 1000.0 },
+            stress = stress,
+            bmi = bmi,
+            bmiLabel = bmiLabel,
+            hcReadGranted = true,
+        )
     }
 
     /** Logs weight (lb): Health Connect first, Room always (timeline source). */

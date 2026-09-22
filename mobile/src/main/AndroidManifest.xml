@@ -34,6 +34,9 @@
     <!-- Result notifications when a new BP estimate is ready -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- v2.4.2: keep the phone screen awake while a BP check is measuring -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Extreme watch alerts take over the screen with a full-screen intent -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
